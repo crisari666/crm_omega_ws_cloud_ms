@@ -99,6 +99,8 @@ export class WhatsappCloudService {
   async msgTemplate(messageTemplate: WhatsAppMessageTemplate) {
     try {
       const url = `${this.graphBaseUrl}/${this.getApiVersion()}/${this.getPhoneNumberId()}/messages`;
+      console.log('messageTemplate', JSON.stringify(messageTemplate, null, 2));
+      console.log('url', url);
       const response = await firstValueFrom(
         this.httpService.post(url, messageTemplate, {
           headers: {
@@ -163,6 +165,104 @@ export class WhatsappCloudService {
     };
     return this.msgTemplate(templateMessage);
   }
+
+  async sendHelloWorldTemplate(phoneNumber: string) {
+    const templateMessage: WhatsAppMessageTemplate = {
+      messaging_product: 'whatsapp',
+      to: phoneNumber,
+      recipient_type: 'individual',
+      type: 'template',
+      template: {
+        name: 'hello_world',
+        language: {
+          code: 'en_US',
+        },
+      },
+    };
+    return this.msgTemplate(templateMessage);
+  }
+
+
+
+  async sendTemplateProposalMessage({code, name, to}: {code: string, name: string, to: string}) {
+    const templateMessage: WhatsAppMessageTemplate = {
+      to,
+      messaging_product: 'whatsapp',
+      recipient_type: 'individual',
+      type: 'template',
+      template: {
+        name: 'mensaje_propuesta',
+        language: {
+          code: 'en',
+        },
+        components: [
+          {
+            type: 'button',
+            sub_type: 'url',
+            index: 0,
+            parameters: [
+              {
+                type: 'text',
+                text: code,
+              },
+            ]
+        }
+        ]
+      },
+    };
+    return this.msgTemplate(templateMessage);
+  }
+
+  async sendTemplateGreetingMessage(phoneNumber: string, name: string) {
+    const templateMessage: WhatsAppMessageTemplate = {
+      to: phoneNumber,
+      messaging_product: 'whatsapp',
+      recipient_type: 'individual',
+      type: 'template',
+      template: {
+        name: 'saludo_aspirante',
+        language: {
+          code: 'es',
+        },
+        components: [
+          {
+            type: 'body',
+            parameters: [
+              {
+                type: 'text',
+                text: name,
+                parameter_name: 'user_name',
+              },
+            ],
+          },
+        ],
+      },
+    };
+    return this.msgTemplate(templateMessage);
+
+  }
+
+  // async sendProposalTemplate(name: string, code: string,  phoneNumber: string) {
+  //   const templateMessage: WhatsAppMessageTemplate = {
+  //     to: phoneNumber,
+  //     messaging_product: 'whatsapp',
+  //     recipient_type: 'individual',
+  //     type: 'template',
+  //     template: {
+  //       name: 'proposicion',
+  //       language: {
+  //         code: 'es',
+  //       },
+  //       components: [
+  //         {
+  //           type: 'body',
+  //           parameters: [
+  //             {
+  //               type: 'text',
+  //               text: name,
+  //               parameter_name: 'name', 
+
+
 
 }
 

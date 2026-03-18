@@ -19,9 +19,10 @@ interface Parameter {
 }
 
 interface Component {
-  type: 'body' | 'header' | 'footer' | 'buttons';
-  
+  type: 'body' | 'header' | 'footer' | 'button';
+  sub_type?: 'url';
   parameters: Parameter[];
+  index?: number;
 }
 
 interface Template {

@@ -5,6 +5,7 @@ import { AppController } from './app.controller';
 import { AppService } from './app.service';
 import { WhatsappCloudModule } from './whatsapp-cloud/whatsapp-cloud.module';
 import { databaseConfig } from './config/database.config';
+import { ClientsModule, Transport } from '@nestjs/microservices';
 
 @Module({
   imports: [
@@ -21,6 +22,26 @@ import { databaseConfig } from './config/database.config';
       },
       inject: [ConfigService],
     }),
+    ClientsModule.registerAsync([
+      {
+        name: 'WS_MS_EVENTS_LISTENER',
+        imports: [ConfigModule],
+        useFactory: (configService: ConfigService) => {
+          const rabbitMqUser = configService.get<string>('RABBIT_MQ_USER', 'guest');
+          const rabbitMqPass = configService.get<string>('RABBIT_MQ_PASS', 'guest');
+          const rabbitMqUrl = `amqp://${rabbitMqUser}:${rabbitMqPass}@localhost:5672`;
+          return {
+            transport: Transport.RMQ,
+            options: {
+              urls: [rabbitMqUrl],
+              queue: 'crm_back_queue', // where MS2 is listening
+              queueOptions: { durable: true },
+            },
+          };
+        },
+        inject: [ConfigService],
+      },
+    ]),
     WhatsappCloudModule,
   ],
   controllers: [AppController],
