@@ -24,7 +24,7 @@ import { ClientsModule, Transport } from '@nestjs/microservices';
     }),
     ClientsModule.registerAsync([
       {
-        name: 'WS_MS_EVENTS_LISTENER',
+        name: 'CRM_BACK_QUEUE',
         imports: [ConfigModule],
         useFactory: (configService: ConfigService) => {
           const rabbitMqUser = configService.get<string>('RABBIT_MQ_USER', 'guest');

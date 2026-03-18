@@ -110,7 +110,7 @@ export class WhatsappCloudService {
         }),
       );
       this.logger.log(
-        `📤 WhatsApp Cloud template sent to ${messageTemplate.to}: ${JSON.stringify(response.data)}`,
+        `📤 WhatsApp Cloud template sent ${messageTemplate.template.name} to ${messageTemplate.to}: ${JSON.stringify(response.data)}`,
       );
       return response.data;
     } catch (error) {
@@ -185,6 +185,9 @@ export class WhatsappCloudService {
 
 
   async sendTemplateProposalMessage({code, name, to}: {code: string, name: string, to: string}) {
+    this.logger.log(
+      `[sendTemplateProposalMessage] Sending proposal to ${to} (name: ${name})`,
+    );
     const templateMessage: WhatsAppMessageTemplate = {
       to,
       messaging_product: 'whatsapp',
@@ -238,8 +241,38 @@ export class WhatsappCloudService {
         ],
       },
     };
+    console.log('templateMessage', JSON.stringify(templateMessage, null, 2));
     return this.msgTemplate(templateMessage);
 
+  }
+
+  async sendTemplateVideoMessage(phoneNumber: string, videoUrl: string): Promise<unknown> {
+    const templateMessage: WhatsAppMessageTemplate = {
+      to: phoneNumber,
+      messaging_product: 'whatsapp',
+      recipient_type: 'individual',
+      type: 'template',
+      template: {
+        name: 'video_msj',
+        language: {
+          code: 'es',
+        },
+        // components: [
+        //   {
+        //     type: 'header',
+        //     parameters: [
+        //       {
+        //         type: 'video',
+        //         video: {
+        //           link: videoUrl,
+        //         },
+        //       },
+        //     ],
+        //   },
+        // ],
+      },
+    };
+    return this.msgTemplate(templateMessage);
   }
 
   // async sendProposalTemplate(name: string, code: string,  phoneNumber: string) {
