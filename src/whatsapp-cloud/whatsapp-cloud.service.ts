@@ -226,7 +226,7 @@ export class WhatsappCloudService {
       template: {
         name: 'info_capacitacion',
         language: {
-          code: 'es',
+          code: 'es_CO',
         },
         components: [
           {

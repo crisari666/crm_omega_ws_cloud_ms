@@ -47,6 +47,7 @@ export class WhatsappOnboardingEventsController {
     }
 
     if (actionValue === 'sent.training_message') {
+      console.log('sent.training_message', payload);
       await this.handleSentTrainingMessage(payload);
       return { success: true };
     }
@@ -89,24 +90,18 @@ export class WhatsappOnboardingEventsController {
   }
 
   private async handleSentTrainingMessage(payload: Record<string, unknown>): Promise<void> {
-    const flowId = payload.flowId != null ? String(payload.flowId) : '';
     const name = payload.name != null ? String(payload.name) : '';
     const phoneNumber = payload.phoneNumber != null ? String(payload.phoneNumber) : '';
-
     const trainingValue = payload.training as
-      | undefined
-      | {
-          id?: unknown;
-          date?: unknown;
-        };
+    | undefined
+    | {
+      attendeeId?: unknown;
+      date?: unknown;
+    };
 
-    const trainingId = trainingValue?.id != null ? String(trainingValue.id) : '';
+    const attendeeId = trainingValue?.attendeeId != null ? String(trainingValue.attendeeId) : '';
     const trainingDate = trainingValue?.date != null ? String(trainingValue.date) : '';
-
-    if (!flowId || !name || !phoneNumber || !trainingId || !trainingDate) return;
-
-    const code = `${trainingId}`;
-    await this.whatsappCloudService.sendTemplateInfoTrainingMessage({ code, name, date: trainingDate, to: phoneNumber });
+    await this.whatsappCloudService.sendTemplateInfoTrainingMessage({ code: attendeeId, name, date: trainingDate, to: phoneNumber });
   }
 }
 
