@@ -12,11 +12,12 @@ import { WhatsappCloudService } from './whatsapp-cloud.service';
 import { SendTextDto } from './dto/send-text.dto';
 import { SendInitialVideoDto } from './dto/send-initial-video.dto';
 import { SendHelloWorldTemplateDto } from './dto/send-hellow-world-template.dto';
-import { SendTemplateProposalDto } from './dto/send-template-proposal.dto';
+import { SendTemplateInfoTrainingDto } from './dto/send-template-info-training.dto';
 import { SendTemplateGreetingDto } from './dto/send-template-greeting.dto';
 import { SendTemplateVideoDto } from './dto/send-template-video.dto';
 import { ClientProxy } from '@nestjs/microservices';
 import { lastValueFrom } from 'rxjs';
+import { SendTemplateCallNotificationDto } from './dto/send-template-call-notification.dto';
 
 @Controller('whatsapp-cloud')
 export class WhatsappCloudController {
@@ -135,11 +136,11 @@ export class WhatsappCloudController {
     return HttpStatus.OK;
   }
 
-  @Post('messages/template/proposal')
+  @Post('messages/template/info-capacitacion')
   @HttpCode(HttpStatus.OK)
-  async sendTemplateProposal(@Body() dto: SendTemplateProposalDto) {
-    const { code, name, to } = dto;
-    return this.whatsappCloudService.sendTemplateProposalMessage({code, name, to});
+  async sendTemplateProposal(@Body() dto: SendTemplateInfoTrainingDto) {
+    const { code, name, date, to } = dto;
+    return this.whatsappCloudService.sendTemplateInfoTrainingMessage({code, name, date, to});
   }
 
   @Post('messages/template/greeting')
@@ -154,5 +155,12 @@ export class WhatsappCloudController {
   async sendTemplateVideo(@Body() dto: SendTemplateVideoDto) {
     const { videoUrl, to } = dto;
     return this.whatsappCloudService.sendTemplateVideoMessage(to, videoUrl);
+  }
+
+  @Post('messages/template/call-notification')
+  @HttpCode(HttpStatus.OK)
+  async sendTemplateCallNotification(@Body() dto: SendTemplateCallNotificationDto) {
+    const { to } = dto;
+    return this.whatsappCloudService.sendTemplateCallNotificationMessage(to);
   }
 }

@@ -1,6 +1,6 @@
 import { IsNotEmpty, IsString } from 'class-validator';
 
-export class SendTemplateProposalDto {
+export class SendTemplateInfoTrainingDto {
   @IsString()
   @IsNotEmpty()
   code: string;
@@ -8,6 +8,10 @@ export class SendTemplateProposalDto {
   @IsString()
   @IsNotEmpty()
   name: string;
+  
+  @IsString()
+  @IsNotEmpty()
+  date: string;
 
   @IsString()
   @IsNotEmpty()

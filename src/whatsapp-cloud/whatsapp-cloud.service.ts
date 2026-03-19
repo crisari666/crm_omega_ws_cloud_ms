@@ -2,6 +2,8 @@ import { HttpException, HttpStatus, Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { HttpService } from '@nestjs/axios';
 import { firstValueFrom } from 'rxjs';
+import { format } from 'date-fns';
+import { enUS, es } from 'date-fns/locale';
 import { WhatsAppMessageTemplate } from './interfaces/message-template-type';
 import {
   WhatsappCloudApiError,
@@ -36,6 +38,33 @@ export class WhatsappCloudService {
 
   private getApiVersion(): string {
     return this.configService.get<string>('WHATSAPP_CLOUD_API_VERSION', 'v23.0');
+  }
+
+  private formatTrainingDateToSpanish(dateString: string): string {
+    const dateObject: Date = new Date(dateString);
+    if (Number.isNaN(dateObject.getTime())) {
+      throw new HttpException(
+        'Invalid training date',
+        HttpStatus.BAD_REQUEST,
+      );
+    }
+    const capitalizeFirstLetter = (input: string): string => {
+      const trimmedInput: string = input.trim();
+      if (!trimmedInput) return trimmedInput;
+      return trimmedInput.charAt(0).toUpperCase() + trimmedInput.slice(1);
+    };
+    const removeDiacritics = (input: string): string => {
+      return input.normalize('NFD').replace(/\p{Diacritic}/gu, '');
+    };
+
+    const dayNameEs: string = format(dateObject, 'EEEE', { locale: es }).trim();
+    const dayOfMonth: string = format(dateObject, 'd');
+    const monthNameEs: string = format(dateObject, 'LLLL', { locale: es }).trim();
+    const timeText: string = format(dateObject, 'h:mm a', { locale: enUS });
+
+    const dayNameSpanishCapitalized: string = removeDiacritics(capitalizeFirstLetter(dayNameEs));
+    const monthNameSpanishCapitalized: string = removeDiacritics(capitalizeFirstLetter(monthNameEs));
+    return `${dayNameSpanishCapitalized} ${dayOfMonth} de ${monthNameSpanishCapitalized} a las ${timeText}`;
   }
 
   /**
@@ -184,21 +213,37 @@ export class WhatsappCloudService {
 
 
 
-  async sendTemplateProposalMessage({code, name, to}: {code: string, name: string, to: string}) {
+  async sendTemplateInfoTrainingMessage({code, name, date, to}: {code: string, name: string, date: string, to: string}) {
     this.logger.log(
       `[sendTemplateProposalMessage] Sending proposal to ${to} (name: ${name})`,
     );
+    const formattedDate: string = this.formatTrainingDateToSpanish(date);
     const templateMessage: WhatsAppMessageTemplate = {
       to,
       messaging_product: 'whatsapp',
       recipient_type: 'individual',
       type: 'template',
       template: {
-        name: 'mensaje_propuesta',
+        name: 'info_capacitacion',
         language: {
-          code: 'en',
+          code: 'es',
         },
         components: [
+          {
+            type: 'body',
+            parameters: [
+              {
+                type: 'text',
+                text: name,
+                parameter_name: 'contact_name',
+              },
+              {
+                type: 'text',
+                text: formattedDate,
+                parameter_name: 'trainning_date',
+              },
+            ],
+          },
           {
             type: 'button',
             sub_type: 'url',
@@ -247,6 +292,7 @@ export class WhatsappCloudService {
   }
 
   async sendTemplateVideoMessage(phoneNumber: string, videoUrl: string): Promise<unknown> {
+    void videoUrl;
     const templateMessage: WhatsAppMessageTemplate = {
       to: phoneNumber,
       messaging_product: 'whatsapp',
@@ -275,27 +321,21 @@ export class WhatsappCloudService {
     return this.msgTemplate(templateMessage);
   }
 
-  // async sendProposalTemplate(name: string, code: string,  phoneNumber: string) {
-  //   const templateMessage: WhatsAppMessageTemplate = {
-  //     to: phoneNumber,
-  //     messaging_product: 'whatsapp',
-  //     recipient_type: 'individual',
-  //     type: 'template',
-  //     template: {
-  //       name: 'proposicion',
-  //       language: {
-  //         code: 'es',
-  //       },
-  //       components: [
-  //         {
-  //           type: 'body',
-  //           parameters: [
-  //             {
-  //               type: 'text',
-  //               text: name,
-  //               parameter_name: 'name', 
-
-
+  async sendTemplateCallNotificationMessage(phoneNumber: string) {
+    const templateMessage: WhatsAppMessageTemplate = {
+      to: phoneNumber,
+      messaging_product: 'whatsapp',
+      recipient_type: 'individual',
+      type: 'template',
+      template: {
+        name: 'call_notification',
+        language: {
+          code: 'en',
+        },
+      },
+    };
+    return this.msgTemplate(templateMessage);
+  }
 
 }
 

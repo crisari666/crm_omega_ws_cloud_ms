@@ -1,5 +1,5 @@
 import { Controller, Inject } from '@nestjs/common';
-import { EventPattern, Payload } from '@nestjs/microservices';
+import { EventPattern, MessagePattern, Payload } from '@nestjs/microservices';
 import { ClientProxy } from '@nestjs/microservices';
 import { lastValueFrom } from 'rxjs';
 import { WhatsappCloudService } from './whatsapp-cloud.service';
@@ -30,22 +30,27 @@ export class WhatsappOnboardingEventsController {
   ) {}
 
   @EventPattern('ms_ws_cloud')
+  @MessagePattern('ms_ws_cloud')
   public async handleMs1Event(
     @Payload() event: CrmBackEventPayload,
-  ): Promise<void> {
+  ): Promise<unknown> {
     const payload = event.payload as Record<string, unknown>;
     const actionValue = payload.action;
-    if (typeof actionValue !== 'string') return;
+    if (typeof actionValue !== 'string') return { success: false, message: 'invalid action' };
 
     if (actionValue === 'send.initial_msg') {
       await this.handleSendInitialMsg(payload);
-      return;
+      return { success: true };
+    }
+    if (actionValue === 'send.call_notification') {
+      return this.handleSendCallNotification(payload);
     }
 
     if (actionValue === 'sent.training_message') {
       await this.handleSentTrainingMessage(payload);
-      return;
+      return { success: true };
     }
+    return { success: false, message: 'unsupported action' };
   }
 
   private async handleSendInitialMsg(payload: Record<string, unknown>): Promise<void> {
@@ -77,6 +82,12 @@ export class WhatsappOnboardingEventsController {
     );
   }
 
+  private async handleSendCallNotification(payload: Record<string, unknown>): Promise<unknown> {
+    const phoneNumber = payload.phoneNumber != null ? String(payload.phoneNumber) : '';
+    if (!phoneNumber) return { success: false, message: 'phoneNumber is required' };
+    return this.whatsappCloudService.sendTemplateCallNotificationMessage(phoneNumber);
+  }
+
   private async handleSentTrainingMessage(payload: Record<string, unknown>): Promise<void> {
     const flowId = payload.flowId != null ? String(payload.flowId) : '';
     const name = payload.name != null ? String(payload.name) : '';
@@ -94,8 +105,8 @@ export class WhatsappOnboardingEventsController {
 
     if (!flowId || !name || !phoneNumber || !trainingId || !trainingDate) return;
 
-    const code = `${trainingId}|${trainingDate}`;
-    await this.whatsappCloudService.sendTemplateProposalMessage({ code, name, to: phoneNumber });
+    const code = `${trainingId}`;
+    await this.whatsappCloudService.sendTemplateInfoTrainingMessage({ code, name, date: trainingDate, to: phoneNumber });
   }
 }
 
