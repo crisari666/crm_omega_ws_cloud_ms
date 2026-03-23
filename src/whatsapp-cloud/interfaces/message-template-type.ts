@@ -14,7 +14,9 @@ interface Parameter {
     link: string;
   };
   video?: {
-    link: string;
+    id?: string;
+    caption?: string;
+    link?: string;
   };
 }
 

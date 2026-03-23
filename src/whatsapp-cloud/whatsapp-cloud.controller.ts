@@ -19,6 +19,9 @@ import { ClientProxy } from '@nestjs/microservices';
 import { lastValueFrom } from 'rxjs';
 import { SendTemplateCallNotificationDto } from './dto/send-template-call-notification.dto';
 
+/** Quick-reply / button payload on saludo_aspirante template (greeting CTA). */
+const GREETING_INTERESTED_BUTTON_LABEL = 'Estoy Interesado';
+
 @Controller('whatsapp-cloud')
 export class WhatsappCloudController {
   public constructor(
@@ -71,36 +74,57 @@ export class WhatsappCloudController {
     const firstChange = changes?.[0];
     const value = firstChange?.value as Record<string, unknown> | undefined;
     if (!value) return HttpStatus.OK;
-
+    console.log({dto: JSON.stringify(dto, null, 2)});
     // Button click webhook (interactive message)
     const messagesValue = value.messages as Array<Record<string, unknown>> | undefined;
     if (Array.isArray(messagesValue)) {
       for (const message of messagesValue) {
         const messageType = message.type;
         console.log({messageType, });
-        if(messageType === 'button') {
-          // console.log('button message', {message});
+        if (messageType === 'button') {
           const context = message.context as Record<string, unknown> | undefined;
-          const videoMessageId = context?.id;
-          if (!videoMessageId) continue;
-  
+          const contextMessageIdValue = context?.id;
+          const contextMessageId =
+            typeof contextMessageIdValue === 'string' ? contextMessageIdValue : '';
+          if (!contextMessageId) continue;
+
           const button = message.button as Record<string, unknown> | undefined;
           const buttonPayload = button?.payload;
-          const buttonPayloadString = typeof buttonPayload === 'string' ? buttonPayload : null;
-  
+          const buttonPayloadString = typeof buttonPayload === 'string' ? buttonPayload : '';
+          const buttonTextValue = button?.text;
+          const buttonTextString = typeof buttonTextValue === 'string' ? buttonTextValue : '';
+          const isGreetingInterestedClick =
+            buttonPayloadString === GREETING_INTERESTED_BUTTON_LABEL ||
+            buttonTextString === GREETING_INTERESTED_BUTTON_LABEL;
+
           const contacts = value.contacts as Array<Record<string, unknown>> | undefined;
           const waIdValue = contacts?.[0]?.wa_id;
           const waId = typeof waIdValue === 'string' ? waIdValue : '';
 
-          console.log( {waId});
-  
+          console.log({ waId });
+
+          if (isGreetingInterestedClick) {
+            await lastValueFrom(
+              this.crmBackQueueClient.emit('ws_ms_event', {
+                type: 'ws_ms_events',
+                payload: {
+                  action: 'whatsapp.interested_button_clicked',
+                  greetingMessageId: contextMessageId,
+                  buttonPayload: buttonPayloadString || buttonTextString,
+                  fromWaId: waId,
+                },
+              }),
+            );
+            continue;
+          }
+
           await lastValueFrom(
             this.crmBackQueueClient.emit('ws_ms_event', {
               type: 'ws_ms_events',
               payload: {
                 action: 'user.clicked_call_button',
-                videoMessageId,
-                buttonPayload: buttonPayloadString,
+                videoMessageId: contextMessageId,
+                buttonPayload: buttonPayloadString || null,
                 fromWaId: waId,
               },
             }),
@@ -160,7 +184,10 @@ export class WhatsappCloudController {
   @Post('messages/template/call-notification')
   @HttpCode(HttpStatus.OK)
   async sendTemplateCallNotification(@Body() dto: SendTemplateCallNotificationDto) {
-    const { to } = dto;
-    return this.whatsappCloudService.sendTemplateCallNotificationMessage(to);
+    const { to, contactName } = dto;
+    return this.whatsappCloudService.sendTemplateCallNotificationMessage({
+      phoneNumber: to,
+      contactName,
+    });
   }
 }

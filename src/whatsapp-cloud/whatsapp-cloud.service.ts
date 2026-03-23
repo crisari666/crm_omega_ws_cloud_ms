@@ -240,7 +240,7 @@ export class WhatsappCloudService {
               {
                 type: 'text',
                 text: formattedDate,
-                parameter_name: 'trainning_date',
+                parameter_name: 'training_date',
               },
             ],
           },
@@ -292,46 +292,64 @@ export class WhatsappCloudService {
   }
 
   async sendTemplateVideoMessage(phoneNumber: string, videoUrl: string): Promise<unknown> {
-    void videoUrl;
     const templateMessage: WhatsAppMessageTemplate = {
       to: phoneNumber,
       messaging_product: 'whatsapp',
       recipient_type: 'individual',
       type: 'template',
       template: {
+        //name: 'video_mock',
         name: 'video_msj',
         language: {
-          code: 'es',
+          //code: 'en',
+          code: 'es_CO',
         },
-        // components: [
-        //   {
-        //     type: 'header',
-        //     parameters: [
-        //       {
-        //         type: 'video',
-        //         video: {
-        //           link: videoUrl,
-        //         },
-        //       },
-        //     ],
-        //   },
-        // ],
+        components: [
+          {
+            type: 'header',
+            parameters: [
+              {
+                type: 'video',
+                video: {
+                  id: '1911053819616278'
+                  // link: `https://back.laceiba.group/bucket/video_reclutamiento_lite.mp4`,
+                  // link: 'https://www.facebook.com/share/r/1C74cuW5mx/',
+                },
+              },
+            ],
+          },
+        ],
       },
     };
     return this.msgTemplate(templateMessage);
   }
 
-  async sendTemplateCallNotificationMessage(phoneNumber: string) {
+  async sendTemplateCallNotificationMessage(input: {
+    phoneNumber: string;
+    contactName: string;
+  }) {
     const templateMessage: WhatsAppMessageTemplate = {
-      to: phoneNumber,
+      to: input.phoneNumber,
       messaging_product: 'whatsapp',
       recipient_type: 'individual',
       type: 'template',
       template: {
         name: 'call_notification',
         language: {
-          code: 'en',
+          code: 'es',
         },
+        components: [
+          {
+            type: 'body',
+            parameters: [
+              {
+                type: 'text',
+                text: input.contactName,
+                parameter_name: 'contact_name',
+              },
+            ],
+          },
+        ],
       },
     };
     return this.msgTemplate(templateMessage);

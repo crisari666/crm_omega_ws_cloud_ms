@@ -42,8 +42,15 @@ export class WhatsappOnboardingEventsController {
       await this.handleSendInitialMsg(payload);
       return { success: true };
     }
+    if (actionValue === 'send.video_after_greeting') {
+      await this.handleSendVideoAfterGreeting(payload);
+      return { success: true };
+    }
     if (actionValue === 'send.call_notification') {
-      return this.handleSendCallNotification(payload);
+      const sent = await this.handleSendCallNotification(payload);
+      return sent
+        ? { success: true }
+        : { success: false, message: 'send.call_notification failed or missing fields' };
     }
 
     if (actionValue === 'sent.training_message') {
@@ -59,12 +66,31 @@ export class WhatsappOnboardingEventsController {
     const userId = payload.userId != null ? String(payload.userId) : '';
     const name = payload.name != null ? String(payload.name) : '';
     const phoneNumber = payload.phoneNumber != null ? String(payload.phoneNumber) : '';
-    const videoUrl = payload.videoUrl != null ? String(payload.videoUrl) : '';
-
     if (!flowId || !userId || !name || !phoneNumber) return;
 
     const greetingResponse = await this.whatsappCloudService.sendTemplateGreetingMessage(phoneNumber, name);
     const greetingMessageId = extractFirstMessageId(greetingResponse);
+
+    await lastValueFrom(
+      this.crmBackQueueClient.emit('ws_ms_event', {
+        type: 'ws_ms_events',
+        payload: {
+          action: 'whatsapp.message_sent',
+          flowId,
+          userId,
+          greetingMessageId,
+        },
+      } as CrmBackEventPayload),
+    );
+  }
+
+  private async handleSendVideoAfterGreeting(payload: Record<string, unknown>): Promise<void> {
+    const flowId = payload.flowId != null ? String(payload.flowId) : '';
+    const userId = payload.userId != null ? String(payload.userId) : '';
+    const phoneNumber = payload.phoneNumber != null ? String(payload.phoneNumber) : '';
+    const videoUrl = payload.videoUrl != null ? String(payload.videoUrl) : '';
+
+    if (!flowId || !userId || !phoneNumber) return;
 
     const videoResponse = await this.whatsappCloudService.sendTemplateVideoMessage(phoneNumber, videoUrl);
     const videoMessageId = extractFirstMessageId(videoResponse);
@@ -76,17 +102,43 @@ export class WhatsappOnboardingEventsController {
           action: 'whatsapp.message_sent',
           flowId,
           userId,
-          greetingMessageId,
           videoMessageId,
         },
       } as CrmBackEventPayload),
     );
   }
 
-  private async handleSendCallNotification(payload: Record<string, unknown>): Promise<unknown> {
+  private async handleSendCallNotification(payload: Record<string, unknown>): Promise<boolean> {
+    const flowId = payload.flowId != null ? String(payload.flowId) : '';
+    const userId = payload.userId != null ? String(payload.userId) : '';
     const phoneNumber = payload.phoneNumber != null ? String(payload.phoneNumber) : '';
-    if (!phoneNumber) return { success: false, message: 'phoneNumber is required' };
-    return this.whatsappCloudService.sendTemplateCallNotificationMessage(phoneNumber);
+    const contactName = payload.name != null ? String(payload.name) : '';
+    const videoMessageId =
+      payload.videoMessageId != null ? String(payload.videoMessageId) : '';
+
+    if (!flowId || !userId || !phoneNumber || !contactName) return false;
+
+    const response = await this.whatsappCloudService.sendTemplateCallNotificationMessage({
+      phoneNumber,
+      contactName,
+    });
+    const callNotificationMessageId = extractFirstMessageId(response);
+
+    await lastValueFrom(
+      this.crmBackQueueClient.emit('ws_ms_event', {
+        type: 'ws_ms_events',
+        payload: {
+          action: 'call.notification_dispatched',
+          flowId,
+          userId,
+          ...(videoMessageId.length > 0 ? { videoMessageId } : {}),
+          ...(callNotificationMessageId != null
+            ? { callNotificationMessageId }
+            : {}),
+        },
+      } as CrmBackEventPayload),
+    );
+    return true;
   }
 
   private async handleSentTrainingMessage(payload: Record<string, unknown>): Promise<void> {
