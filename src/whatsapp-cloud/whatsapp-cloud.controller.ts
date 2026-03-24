@@ -18,9 +18,9 @@ import { SendTemplateVideoDto } from './dto/send-template-video.dto';
 import { ClientProxy } from '@nestjs/microservices';
 import { lastValueFrom } from 'rxjs';
 import { SendTemplateCallNotificationDto } from './dto/send-template-call-notification.dto';
-
-/** Quick-reply / button payload on saludo_aspirante template (greeting CTA). */
-const GREETING_INTERESTED_BUTTON_LABEL = 'Estoy Interesado';
+import { WHATSAPP_ONBOARDING_WEBHOOK_CTAS } from './utils/onboarding-webhook.constants';
+import { matchesGreetingInterestedInput } from './utils/match-greeting-interested.util';
+import { matchesVideoInterestedInput } from './utils/match-video-interested.util';
 
 @Controller('whatsapp-cloud')
 export class WhatsappCloudController {
@@ -81,42 +81,50 @@ export class WhatsappCloudController {
       for (const message of messagesValue) {
         const messageType = message.type;
         console.log({messageType, });
-        if (messageType === 'button') {
+        if (messageType === 'button' || messageType === 'text') {
           const context = message.context as Record<string, unknown> | undefined;
           const contextMessageIdValue = context?.id;
           const contextMessageId =
             typeof contextMessageIdValue === 'string' ? contextMessageIdValue : '';
-          if (!contextMessageId) continue;
 
           const button = message.button as Record<string, unknown> | undefined;
           const buttonPayload = button?.payload;
           const buttonPayloadString = typeof buttonPayload === 'string' ? buttonPayload : '';
           const buttonTextValue = button?.text;
           const buttonTextString = typeof buttonTextValue === 'string' ? buttonTextValue : '';
-          const isGreetingInterestedClick =
-            buttonPayloadString === GREETING_INTERESTED_BUTTON_LABEL ||
-            buttonTextString === GREETING_INTERESTED_BUTTON_LABEL;
+          const text = message.text as Record<string, unknown> | undefined;
+          const textBodyValue = text?.body;
+          const textBodyString = typeof textBodyValue === 'string' ? textBodyValue : '';
 
           const contacts = value.contacts as Array<Record<string, unknown>> | undefined;
           const waIdValue = contacts?.[0]?.wa_id;
           const waId = typeof waIdValue === 'string' ? waIdValue : '';
 
-          console.log({ waId });
-
-          if (isGreetingInterestedClick) {
-            await lastValueFrom(
-              this.crmBackQueueClient.emit('ws_ms_event', {
-                type: 'ws_ms_events',
-                payload: {
-                  action: 'whatsapp.interested_button_clicked',
-                  greetingMessageId: contextMessageId,
-                  buttonPayload: buttonPayloadString || buttonTextString,
-                  fromWaId: waId,
-                },
-              }),
-            );
+          if (
+            await this.handleGreetingMessageReply({
+              buttonPayloadString,
+              buttonTextString,
+              textBodyString,
+              contextMessageId,
+              waId,
+            })
+          ) {
             continue;
           }
+
+          if (
+            await this.handleVideoMessageReply({
+              buttonPayloadString,
+              buttonTextString,
+              textBodyString,
+              contextMessageId,
+              waId,
+            })
+          ) {
+            continue;
+          }
+
+          if (messageType !== 'button' || !contextMessageId) continue;
 
           await lastValueFrom(
             this.crmBackQueueClient.emit('ws_ms_event', {
@@ -158,6 +166,83 @@ export class WhatsappCloudController {
     }
 
     return HttpStatus.OK;
+  }
+
+  /**
+   * Greeting template (`saludo_aspirante`) CTA: "Estoy Interesado" via button or text.
+   * @returns true when this message matches the greeting CTA (emits CRM event only if `contextMessageId` is set).
+   */
+  private async handleGreetingMessageReply(input: {
+    buttonPayloadString: string;
+    buttonTextString: string;
+    textBodyString: string;
+    contextMessageId: string;
+    waId: string;
+  }): Promise<boolean> {
+    const isGreetingInterested =
+      matchesGreetingInterestedInput(input.buttonPayloadString) ||
+      matchesGreetingInterestedInput(input.buttonTextString) ||
+      matchesGreetingInterestedInput(input.textBodyString);
+    if (!isGreetingInterested) return false;
+    const resolvedPayload =
+      input.buttonPayloadString ||
+      input.buttonTextString ||
+      input.textBodyString ||
+      WHATSAPP_ONBOARDING_WEBHOOK_CTAS.greetingInterested;
+    console.log({ waId: input.waId, greetingInterested: true });
+    if (!input.contextMessageId) return true;
+    await lastValueFrom(
+      this.crmBackQueueClient.emit('ws_ms_event', {
+        type: 'ws_ms_events',
+        payload: {
+          action: 'whatsapp.interested_button_clicked',
+          greetingMessageId: input.contextMessageId,
+          buttonPayload: resolvedPayload,
+          fromWaId: input.waId,
+        },
+      }),
+    );
+    return true;
+  }
+
+  /**
+   * Video template (`video_msj`) CTA: "Interesado" via button or text (optional quoted `contextMessageId`).
+   * @returns true when this message matches the video CTA.
+   */
+  private async handleVideoMessageReply(input: {
+    buttonPayloadString: string;
+    buttonTextString: string;
+    textBodyString: string;
+    contextMessageId: string;
+    waId: string;
+  }): Promise<boolean> {
+    const isVideoInterested =
+      matchesVideoInterestedInput(input.buttonPayloadString) ||
+      matchesVideoInterestedInput(input.buttonTextString) ||
+      matchesVideoInterestedInput(input.textBodyString);
+    if (!isVideoInterested) return false;
+    if (!input.contextMessageId && !input.waId) return true;
+    const resolvedPayload =
+      input.buttonPayloadString ||
+      input.buttonTextString ||
+      input.textBodyString ||
+      WHATSAPP_ONBOARDING_WEBHOOK_CTAS.videoInterested;
+    console.log({ waId: input.waId, videoInterested: true });
+    const videoPayload: Record<string, unknown> = {
+      action: 'user.clicked_call_button',
+      buttonPayload: resolvedPayload,
+      fromWaId: input.waId,
+    };
+    if (input.contextMessageId.length > 0) {
+      videoPayload.videoMessageId = input.contextMessageId;
+    }
+    await lastValueFrom(
+      this.crmBackQueueClient.emit('ws_ms_event', {
+        type: 'ws_ms_events',
+        payload: videoPayload,
+      }),
+    );
+    return true;
   }
 
   @Post('messages/template/info-capacitacion')
