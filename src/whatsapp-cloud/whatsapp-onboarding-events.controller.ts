@@ -58,7 +58,55 @@ export class WhatsappOnboardingEventsController {
       await this.handleSentTrainingMessage(payload);
       return { success: true };
     }
+    if (actionValue === 'send.import_sequence_step') {
+      return this.handleSendImportSequenceStep(payload);
+    }
     return { success: false, message: 'unsupported action' };
+  }
+
+  /**
+   * Import nurture: 0 greeting, 1 video, 2 call notification, 3–4 reminder (same greeting template).
+   */
+  private async handleSendImportSequenceStep(
+    payload: Record<string, unknown>,
+  ): Promise<{ success: boolean; message?: string }> {
+    const stepRaw = payload.importSequenceStep;
+    const step =
+      typeof stepRaw === 'number'
+        ? stepRaw
+        : stepRaw != null
+          ? Number(stepRaw)
+          : Number.NaN;
+    if (Number.isNaN(step) || step < 0 || step > 4) {
+      return { success: false, message: 'invalid importSequenceStep' };
+    }
+    if (step === 0) {
+      await this.handleSendInitialMsg(payload);
+      return { success: true };
+    }
+    if (step === 1) {
+      const videoId =
+        payload.videoId != null
+          ? String(payload.videoId).trim()
+          : payload.videoMediaId != null
+            ? String(payload.videoMediaId).trim()
+            : '';
+      if (videoId.length === 0) {
+        return { success: false, message: 'missing videoId for import sequence step 1' };
+      }
+      await this.handleSendVideoAfterGreeting(payload);
+      return { success: true };
+    }
+    if (step === 2) {
+      const sent = await this.handleSendCallNotification(payload);
+      return sent
+        ? { success: true }
+        : { success: false, message: 'send.call_notification failed or missing fields' };
+    }
+    const reminderSent = await this.handleSendImportSequenceReminder(payload, step);
+    return reminderSent
+      ? { success: true }
+      : { success: false, message: 'import sequence reminder failed or missing message id' };
   }
 
   private async handleSendInitialMsg(payload: Record<string, unknown>): Promise<void> {
@@ -149,6 +197,43 @@ export class WhatsappOnboardingEventsController {
           ...(callNotificationMessageId != null
             ? { callNotificationMessageId }
             : {}),
+        },
+      } as CrmBackEventPayload),
+    );
+    return true;
+  }
+
+  private async handleSendImportSequenceReminder(
+    payload: Record<string, unknown>,
+    importSequenceStep: number,
+  ): Promise<boolean> {
+    const flowId = payload.flowId != null ? String(payload.flowId) : '';
+    const userId = payload.userId != null ? String(payload.userId) : '';
+    const name = payload.name != null ? String(payload.name) : '';
+    const phoneNumber = payload.phoneNumber != null ? String(payload.phoneNumber) : '';
+    if (!flowId || !userId || !name || !phoneNumber) {
+      return false;
+    }
+    const reminderResponse = await this.whatsappCloudService.sendTemplateGreetingMessage(
+      phoneNumber,
+      name,
+    );
+    const reminderMessageId = extractFirstMessageId(reminderResponse);
+    if (reminderMessageId == null) {
+      console.error(
+        'handleSendImportSequenceReminder: Graph API did not return a message id',
+      );
+      return false;
+    }
+    await lastValueFrom(
+      this.crmBackQueueClient.emit('ws_ms_event', {
+        type: 'ws_ms_events',
+        payload: {
+          action: 'whatsapp.import_sequence_reminder_sent',
+          flowId,
+          userId,
+          importSequenceStep,
+          reminderMessageId,
         },
       } as CrmBackEventPayload),
     );
