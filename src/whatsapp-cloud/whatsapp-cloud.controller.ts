@@ -57,7 +57,7 @@ export class WhatsappCloudController {
   @Post('webhook')
   @HttpCode(HttpStatus.OK)
   async webhookPost(@Body() dto: unknown): Promise<HttpStatus> {
-    // console.log('webhookPost', JSON.stringify(dto, null, 2));
+    console.log('webhookPost', JSON.stringify(dto, null, 2));
     const payload = dto as Record<string, unknown>;
     const entry = payload.entry as Array<Record<string, unknown>> | undefined;
     const firstEntry = entry?.[0];

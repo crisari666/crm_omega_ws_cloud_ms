@@ -270,7 +270,7 @@ export class WhatsappCloudService {
       template: {
         name: 'saludo_aspirante',
         language: {
-          code: 'es',
+          code: 'en',
         },
         components: [
           {
