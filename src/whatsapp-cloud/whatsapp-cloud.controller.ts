@@ -39,16 +39,6 @@ export class WhatsappCloudController {
     return this.whatsappCloudService.sendTextMessage(to, body);
   }
 
-  /**
-   * Endpoint to send the \"initial_video\" template message
-   */
-  @Post('messages/template/initial-video')
-  @HttpCode(HttpStatus.OK)
-  async sendInitialVideo(@Body() dto: SendInitialVideoDto) {
-    const { to, name } = dto;
-    return this.whatsappCloudService.sendInitialVideoTemplate(name, to);
-  }
-
   @Post('messages/template/hello-world')
   @HttpCode(HttpStatus.OK)
   async sendHelloWorld(@Body() dto: SendHelloWorldTemplateDto) {
@@ -262,8 +252,8 @@ export class WhatsappCloudController {
   @Post('messages/template/video')
   @HttpCode(HttpStatus.OK)
   async sendTemplateVideo(@Body() dto: SendTemplateVideoDto) {
-    const { videoUrl, to } = dto;
-    return this.whatsappCloudService.sendTemplateVideoMessage(to, videoUrl);
+    const { videoId, to } = dto;
+    return this.whatsappCloudService.sendTemplateVideoMessage(to, videoId);
   }
 
   @Post('messages/template/call-notification')

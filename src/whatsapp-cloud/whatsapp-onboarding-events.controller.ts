@@ -88,11 +88,25 @@ export class WhatsappOnboardingEventsController {
     const flowId = payload.flowId != null ? String(payload.flowId) : '';
     const userId = payload.userId != null ? String(payload.userId) : '';
     const phoneNumber = payload.phoneNumber != null ? String(payload.phoneNumber) : '';
-    const videoUrl = payload.videoUrl != null ? String(payload.videoUrl) : '';
+    const videoId =
+      payload.videoId != null
+        ? String(payload.videoId).trim()
+        : payload.videoMediaId != null
+          ? String(payload.videoMediaId).trim()
+          : '';
 
     if (!flowId || !userId || !phoneNumber) return;
+    if (!videoId) {
+      console.error(
+        'handleSendVideoAfterGreeting: missing videoId from omega_office_back payload; skip video template',
+      );
+      return;
+    }
 
-    const videoResponse = await this.whatsappCloudService.sendTemplateVideoMessage(phoneNumber, videoUrl);
+    const videoResponse = await this.whatsappCloudService.sendTemplateVideoMessage(
+      phoneNumber,
+      videoId,
+    );
     const videoMessageId = extractFirstMessageId(videoResponse);
 
     await lastValueFrom(

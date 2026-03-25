@@ -279,7 +279,7 @@ export class WhatsappCloudService {
               {
                 type: 'text',
                 text: name,
-                parameter_name: 'user_name',
+                parameter_name: 'contact_name',
               },
             ],
           },
@@ -291,17 +291,29 @@ export class WhatsappCloudService {
 
   }
 
-  async sendTemplateVideoMessage(phoneNumber: string, videoUrl: string): Promise<unknown> {
+  /**
+   * Sends `video_msj` with a header video. Meta requires an uploaded **media id** (`video.id`).
+   * The id is supplied by the caller (onboarding sends it from `omega_office_back` via Rabbit or REST body).
+   */
+  async sendTemplateVideoMessage(
+    phoneNumber: string,
+    videoMediaId: string,
+  ): Promise<unknown> {
+    const resolvedId = videoMediaId.trim();
+    if (resolvedId.length === 0) {
+      throw new HttpException(
+        'WhatsApp video template requires videoMediaId (provided by omega_office_back or API client)',
+        HttpStatus.BAD_REQUEST,
+      );
+    }
     const templateMessage: WhatsAppMessageTemplate = {
       to: phoneNumber,
       messaging_product: 'whatsapp',
       recipient_type: 'individual',
       type: 'template',
       template: {
-        //name: 'video_mock',
         name: 'video_msj',
         language: {
-          //code: 'en',
           code: 'es_CO',
         },
         components: [
@@ -311,9 +323,7 @@ export class WhatsappCloudService {
               {
                 type: 'video',
                 video: {
-                  id: '1911053819616278'
-                  // link: `https://back.laceiba.group/bucket/video_reclutamiento_lite.mp4`,
-                  // link: 'https://www.facebook.com/share/r/1C74cuW5mx/',
+                  id: resolvedId,
                 },
               },
             ],
