@@ -21,6 +21,7 @@ import { SendTemplateCallNotificationDto } from './dto/send-template-call-notifi
 import { WHATSAPP_ONBOARDING_WEBHOOK_CTAS } from './utils/onboarding-webhook.constants';
 import { matchesGreetingInterestedInput } from './utils/match-greeting-interested.util';
 import { matchesVideoInterestedInput } from './utils/match-video-interested.util';
+import { WHATSAPP_ECOSYSTEM_HEALTH_DELIVERY_ERROR_CODE } from './utils/whatsapp-ecosystem-delivery.constants';
 
 @Controller('whatsapp-cloud')
 export class WhatsappCloudController {
@@ -64,7 +65,6 @@ export class WhatsappCloudController {
     const firstChange = changes?.[0];
     const value = firstChange?.value as Record<string, unknown> | undefined;
     if (!value) return HttpStatus.OK;
-    console.log({dto: JSON.stringify(dto, null, 2)});
     // Button click webhook (interactive message)
     const messagesValue = value.messages as Array<Record<string, unknown>> | undefined;
     if (Array.isArray(messagesValue)) {
@@ -132,17 +132,27 @@ export class WhatsappCloudController {
 
     }
 
-    // Status webhooks (sent/delivered)
     const statusesValue = value.statuses as Array<Record<string, unknown>> | undefined;
     if (Array.isArray(statusesValue)) {
       for (const status of statusesValue) {
+        const ecosystemPayload = this.extractEcosystemBlockedDeliveryPayload(status);
+        if (ecosystemPayload != null) {
+          await lastValueFrom(
+            this.crmBackQueueClient.emit('ws_ms_event', {
+              type: 'ws_ms_events',
+              payload: {
+                action: 'whatsapp.message_not_delivered_ecosystem',
+                ...ecosystemPayload,
+              },
+            }),
+          );
+          continue;
+        }
         const statusValue = status.status;
         if (statusValue !== 'delivered') continue;
-
         const messageIdValue = status.id;
         const messageId = typeof messageIdValue === 'string' ? messageIdValue : '';
         if (!messageId) continue;
-
         await lastValueFrom(
           this.crmBackQueueClient.emit('ws_ms_event', {
             type: 'ws_ms_events',
@@ -156,6 +166,49 @@ export class WhatsappCloudController {
     }
 
     return HttpStatus.OK;
+  }
+
+  /**
+   * When WhatsApp blocks delivery for ecosystem health (e.g. code 131049), returns payload for CRM-back.
+   */
+  private extractEcosystemBlockedDeliveryPayload(
+    status: Record<string, unknown>,
+  ): {
+    messageId: string;
+    recipientId: string;
+    code: number;
+    title: string;
+    message: string;
+    errorDetails: string;
+  } | null {
+    const statusValue = status.status;
+    if (statusValue !== 'failed') {
+      return null;
+    }
+    const errorsRaw = status.errors;
+    if (!Array.isArray(errorsRaw) || errorsRaw.length === 0) {
+      return null;
+    }
+    const firstError = errorsRaw[0] as Record<string, unknown>;
+    const codeRaw = firstError.code;
+    const code =
+      typeof codeRaw === 'number' ? codeRaw : codeRaw != null ? Number(codeRaw) : Number.NaN;
+    if (Number.isNaN(code) || code !== WHATSAPP_ECOSYSTEM_HEALTH_DELIVERY_ERROR_CODE) {
+      return null;
+    }
+    const messageIdValue = status.id;
+    const messageId = typeof messageIdValue === 'string' ? messageIdValue : '';
+    if (messageId.length === 0) {
+      return null;
+    }
+    const recipientIdValue = status.recipient_id;
+    const recipientId = typeof recipientIdValue === 'string' ? recipientIdValue : '';
+    const title = typeof firstError.title === 'string' ? firstError.title : '';
+    const message = typeof firstError.message === 'string' ? firstError.message : '';
+    const errorData = firstError.error_data as Record<string, unknown> | undefined;
+    const detailsRaw = errorData?.details;
+    const errorDetails = typeof detailsRaw === 'string' ? detailsRaw : '';
+    return { messageId, recipientId, code, title, message, errorDetails };
   }
 
   /**
