@@ -4,13 +4,14 @@ import {
   Get,
   HttpCode,
   HttpStatus,
+  Logger,
   Post,
   Query,
   Inject,
 } from '@nestjs/common';
 import { WhatsappCloudService } from './whatsapp-cloud.service';
+import { DeepSeekService } from './deep-seek.service';
 import { SendTextDto } from './dto/send-text.dto';
-import { SendInitialVideoDto } from './dto/send-initial-video.dto';
 import { SendHelloWorldTemplateDto } from './dto/send-hellow-world-template.dto';
 import { SendTemplateInfoTrainingDto } from './dto/send-template-info-training.dto';
 import { SendTemplateGreetingDto } from './dto/send-template-greeting.dto';
@@ -25,8 +26,11 @@ import { WHATSAPP_ECOSYSTEM_HEALTH_DELIVERY_ERROR_CODE } from './utils/whatsapp-
 
 @Controller('whatsapp-cloud')
 export class WhatsappCloudController {
+  private readonly logger = new Logger(WhatsappCloudController.name);
+
   public constructor(
     private readonly whatsappCloudService: WhatsappCloudService,
+    private readonly deepSeekService: DeepSeekService,
     @Inject('CRM_BACK_QUEUE') private readonly crmBackQueueClient: ClientProxy,
   ) {}
 
@@ -69,26 +73,34 @@ export class WhatsappCloudController {
     const messagesValue = value.messages as Array<Record<string, unknown>> | undefined;
     if (Array.isArray(messagesValue)) {
       for (const message of messagesValue) {
-        const messageType = message.type;
-        console.log({messageType, });
+        if (message == null || typeof message !== 'object') continue;
+        const messageRecord = message as Record<string, unknown>;
+        await this.emitInboundUserMessageToCrmBack(value, messageRecord);
+        const messageType = messageRecord.type;
+        console.log({ messageType });
         if (messageType === 'button' || messageType === 'text') {
-          const context = message.context as Record<string, unknown> | undefined;
+          const context = messageRecord.context as Record<string, unknown> | undefined;
           const contextMessageIdValue = context?.id;
           const contextMessageId =
             typeof contextMessageIdValue === 'string' ? contextMessageIdValue : '';
 
-          const button = message.button as Record<string, unknown> | undefined;
+          const button = messageRecord.button as Record<string, unknown> | undefined;
           const buttonPayload = button?.payload;
           const buttonPayloadString = typeof buttonPayload === 'string' ? buttonPayload : '';
           const buttonTextValue = button?.text;
           const buttonTextString = typeof buttonTextValue === 'string' ? buttonTextValue : '';
-          const text = message.text as Record<string, unknown> | undefined;
+          const text = messageRecord.text as Record<string, unknown> | undefined;
           const textBodyValue = text?.body;
           const textBodyString = typeof textBodyValue === 'string' ? textBodyValue : '';
 
           const contacts = value.contacts as Array<Record<string, unknown>> | undefined;
           const waIdValue = contacts?.[0]?.wa_id;
           const waId = typeof waIdValue === 'string' ? waIdValue : '';
+          const profile = contacts?.[0]?.profile as Record<string, unknown> | undefined;
+          const contactName =
+            typeof profile?.name === 'string' && profile.name.trim().length > 0
+              ? profile.name.trim()
+              : undefined;
 
           if (
             await this.handleGreetingMessageReply({
@@ -111,6 +123,33 @@ export class WhatsappCloudController {
               waId,
             })
           ) {
+            continue;
+          }
+
+          if (messageType === 'text' && textBodyString.trim().length > 0) {
+            await this.maybeSendDeepSeekLotesReply({
+              waId,
+              textBody: textBodyString.trim(),
+              contactName,
+            });
+            continue;
+          }
+
+          if (
+            messageType === 'button' &&
+            contextMessageId.length === 0 &&
+            (buttonTextString.length > 0 || buttonPayloadString.length > 0)
+          ) {
+            const snippet = [buttonTextString, buttonPayloadString]
+              .filter((s) => s.length > 0)
+              .join(' ');
+            if (snippet.length > 0) {
+              await this.maybeSendDeepSeekLotesReply({
+                waId,
+                textBody: snippet,
+                contactName,
+              });
+            }
             continue;
           }
 
@@ -166,6 +205,102 @@ export class WhatsappCloudController {
     }
 
     return HttpStatus.OK;
+  }
+
+  /**
+   * La Ceiba chat (DeepSeek): replies when the message is not handled by onboarding CTAs.
+   */
+  private async maybeSendDeepSeekLotesReply(input: {
+    waId: string;
+    textBody: string;
+    contactName?: string;
+  }): Promise<void> {
+    if (input.waId.length === 0) return;
+    try {
+      const reply = await this.deepSeekService.replyLotesChat({
+        userMessage: input.textBody,
+        contactName: input.contactName,
+      });
+      if (reply.length === 0) return;
+      await this.whatsappCloudService.sendTextMessage(input.waId, reply);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      this.logger.warn(`maybeSendDeepSeekLotesReply failed: ${message}`);
+    }
+  }
+
+  /**
+   * Persists inbound WhatsApp user messages on the monolith onboarding flow (`whatsapp.user_message_received`).
+   */
+  private async emitInboundUserMessageToCrmBack(
+    value: Record<string, unknown>,
+    message: Record<string, unknown>,
+  ): Promise<void> {
+    const payload = this.buildWhatsappInboundUserMessagePayload(value, message);
+    const whatsappMessageId =
+      typeof payload.whatsappMessageId === 'string' ? payload.whatsappMessageId : '';
+    const fromWaId = typeof payload.fromWaId === 'string' ? payload.fromWaId : '';
+    if (whatsappMessageId.length === 0 || fromWaId.length === 0) {
+      return;
+    }
+    await lastValueFrom(
+      this.crmBackQueueClient.emit('ws_ms_event', {
+        type: 'ws_ms_events',
+        payload,
+      }),
+    );
+  }
+
+  /**
+   * Maps WhatsApp Cloud webhook `messages[]` item + parent `value` to CRM-back onboarding payload.
+   */
+  private buildWhatsappInboundUserMessagePayload(
+    value: Record<string, unknown>,
+    message: Record<string, unknown>,
+  ): Record<string, unknown> {
+    const metadata = value.metadata as Record<string, unknown> | undefined;
+    const contacts = value.contacts as Array<Record<string, unknown>> | undefined;
+    const profile = contacts?.[0]?.profile as Record<string, unknown> | undefined;
+    const fromValue = message.from;
+    const fromWaId = typeof fromValue === 'string' ? fromValue : '';
+    const waIdFromContacts = contacts?.[0]?.wa_id;
+    const resolvedWaId =
+      fromWaId.length > 0
+        ? fromWaId
+        : typeof waIdFromContacts === 'string'
+          ? waIdFromContacts
+          : '';
+    const messageIdValue = message.id;
+    const whatsappMessageId = typeof messageIdValue === 'string' ? messageIdValue : '';
+    const timestampValue = message.timestamp;
+    const timestamp =
+      typeof timestampValue === 'string'
+        ? timestampValue
+        : timestampValue != null
+          ? String(timestampValue)
+          : '';
+    const messageTypeRaw = message.type;
+    const messageTypeString = typeof messageTypeRaw === 'string' ? messageTypeRaw : '';
+    const context = message.context as Record<string, unknown> | undefined;
+    const contextMessageId = typeof context?.id === 'string' ? context.id : '';
+    const button = message.button as Record<string, unknown> | undefined;
+    const text = message.text as Record<string, unknown> | undefined;
+    const textBody = typeof text?.body === 'string' ? text.body : '';
+    return {
+      action: 'whatsapp.user_message_received',
+      fromWaId: resolvedWaId,
+      whatsappMessageId,
+      messageType: messageTypeString,
+      timestamp,
+      textBody,
+      buttonPayload: typeof button?.payload === 'string' ? button.payload : '',
+      buttonText: typeof button?.text === 'string' ? button.text : '',
+      contextMessageId,
+      profileName: typeof profile?.name === 'string' ? profile.name : '',
+      phoneNumberId: typeof metadata?.phone_number_id === 'string' ? metadata.phone_number_id : '',
+      displayPhoneNumber:
+        typeof metadata?.display_phone_number === 'string' ? metadata.display_phone_number : '',
+    };
   }
 
   /**

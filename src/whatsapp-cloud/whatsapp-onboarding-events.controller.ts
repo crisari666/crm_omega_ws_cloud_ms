@@ -248,11 +248,23 @@ export class WhatsappOnboardingEventsController {
     | {
       attendeeId?: unknown;
       date?: unknown;
+      trainingDateTimeIso?: unknown;
     };
 
     const attendeeId = trainingValue?.attendeeId != null ? String(trainingValue.attendeeId) : '';
     const trainingDate = trainingValue?.date != null ? String(trainingValue.date) : '';
-    await this.whatsappCloudService.sendTemplateInfoTrainingMessage({ code: attendeeId, name, date: trainingDate, to: phoneNumber });
+    const trainingDateTimeIso =
+      trainingValue?.trainingDateTimeIso != null
+        ? String(trainingValue.trainingDateTimeIso)
+        : '';
+    const dateForTemplate =
+      trainingDateTimeIso.length > 0 ? trainingDateTimeIso : trainingDate;
+    await this.whatsappCloudService.sendTemplateInfoTrainingMessage({
+      code: attendeeId,
+      name,
+      date: dateForTemplate,
+      to: phoneNumber,
+    });
   }
 }
 

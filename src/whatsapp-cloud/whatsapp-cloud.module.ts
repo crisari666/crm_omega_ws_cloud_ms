@@ -5,6 +5,7 @@ import { ClientsModule, Transport } from '@nestjs/microservices';
 import { WhatsappCloudService } from './whatsapp-cloud.service';
 import { WhatsappCloudController } from './whatsapp-cloud.controller';
 import { WhatsappOnboardingEventsController } from './whatsapp-onboarding-events.controller';
+import { DeepSeekService } from './deep-seek.service';
 
 @Module({
   imports: [
@@ -35,8 +36,8 @@ import { WhatsappOnboardingEventsController } from './whatsapp-onboarding-events
     }),
   ],
   controllers: [WhatsappCloudController, WhatsappOnboardingEventsController],
-  providers: [WhatsappCloudService],
-  exports: [WhatsappCloudService],
+  providers: [WhatsappCloudService, DeepSeekService],
+  exports: [WhatsappCloudService, DeepSeekService],
 })
 export class WhatsappCloudModule {}
 
