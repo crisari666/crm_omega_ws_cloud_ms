@@ -252,17 +252,11 @@ export class WhatsappOnboardingEventsController {
     };
 
     const attendeeId = trainingValue?.attendeeId != null ? String(trainingValue.attendeeId) : '';
-    const trainingDate = trainingValue?.date != null ? String(trainingValue.date) : '';
-    const trainingDateTimeIso =
-      trainingValue?.trainingDateTimeIso != null
-        ? String(trainingValue.trainingDateTimeIso)
-        : '';
-    const dateForTemplate =
-      trainingDateTimeIso.length > 0 ? trainingDateTimeIso : trainingDate;
+    const trainingDate = trainingValue?.trainingDateTimeIso as string;
     await this.whatsappCloudService.sendTemplateInfoTrainingMessage({
       code: attendeeId,
       name,
-      date: dateForTemplate,
+      date: trainingDate,
       to: phoneNumber,
     });
   }
