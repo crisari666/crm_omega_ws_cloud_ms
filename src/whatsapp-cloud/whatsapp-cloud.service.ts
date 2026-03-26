@@ -215,7 +215,7 @@ export class WhatsappCloudService {
 
   async sendTemplateInfoTrainingMessage({code, name, date, to}: {code: string, name: string, date: string, to: string}) {
     this.logger.log(
-      `[sendTemplateProposalMessage] Sending proposal to ${to} (name: ${name})`,
+      `[sendTemplateProposalMessage] Sending proposal to ${to} (name: ${name}, date: ${date})`,
     );
     const formattedDate: string = this.formatTrainingDateToSpanish(date);
     const templateMessage: WhatsAppMessageTemplate = {
