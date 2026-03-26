@@ -223,6 +223,25 @@ export class WhatsappCloudController {
       });
       if (reply.length === 0) return;
       await this.whatsappCloudService.sendTextMessage(input.waId, reply);
+      try {
+        await lastValueFrom(
+          this.crmBackQueueClient.emit('ws_ms_event', {
+            type: 'ws_ms_events',
+            payload: {
+              action: 'whatsapp.deepseek_lotes_chat_turn',
+              fromWaId: input.waId,
+              userMessage: input.textBody,
+              aiResponse: reply,
+              ...(input.contactName != null && input.contactName.length > 0
+                ? { contactName: input.contactName }
+                : {}),
+            },
+          }),
+        );
+      } catch (emitErr) {
+        const emitMessage = emitErr instanceof Error ? emitErr.message : String(emitErr);
+        this.logger.warn(`emit deepseek_lotes_chat_turn to CRM failed: ${emitMessage}`);
+      }
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       this.logger.warn(`maybeSendDeepSeekLotesReply failed: ${message}`);
