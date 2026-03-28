@@ -77,6 +77,14 @@ export class WhatsappCloudController {
       const msg = err instanceof Error ? err.message : String(err);
       this.logger.warn(`persistInboundWebhookPayload failed: ${msg}`);
     }
+    const metadata = value.metadata as Record<string, unknown> | undefined;
+    const webhookPhoneNumberIdRaw = metadata?.phone_number_id;
+    const webhookPhoneNumberIdTrimmed =
+      typeof webhookPhoneNumberIdRaw === 'string' ? webhookPhoneNumberIdRaw.trim() : '';
+    const phoneNumberIdForChat =
+      webhookPhoneNumberIdTrimmed.length > 0
+        ? webhookPhoneNumberIdTrimmed
+        : this.whatsappCloudService.getConfiguredPhoneNumberId();
     // Button click webhook (interactive message)
     const messagesValue = value.messages as Array<Record<string, unknown>> | undefined;
     if (Array.isArray(messagesValue)) {
@@ -139,6 +147,7 @@ export class WhatsappCloudController {
               waId,
               textBody: textBodyString.trim(),
               contactName,
+              phoneNumberId: phoneNumberIdForChat,
             });
             continue;
           }
@@ -156,6 +165,7 @@ export class WhatsappCloudController {
                 waId,
                 textBody: snippet,
                 contactName,
+                phoneNumberId: phoneNumberIdForChat,
               });
             }
             continue;
@@ -221,13 +231,20 @@ export class WhatsappCloudController {
   private async maybeSendDeepSeekLotesReply(input: {
     waId: string;
     textBody: string;
+    phoneNumberId: string;
     contactName?: string;
   }): Promise<void> {
     if (input.waId.length === 0) return;
     try {
+      const conversation = await this.wsChatMsgHandlerService.buildRecentLlmConversation({
+        waId: input.waId,
+        phoneNumberId: input.phoneNumberId,
+        fallbackUserText: input.textBody,
+      });
       const reply = await this.deepSeekService.replyLotesChat({
         userMessage: input.textBody,
         contactName: input.contactName,
+        conversation: conversation.length > 0 ? conversation : undefined,
       });
       if (reply.length === 0) return;
       await this.whatsappCloudService.sendTextMessage(input.waId, reply);

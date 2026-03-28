@@ -11,6 +11,7 @@ import {
   WhatsappMessageMedia,
 } from './schemas/whatsapp-message.schema';
 import type { PaginatedResult } from './types/paginated-result.type';
+import type { WhatsappLlmConversationTurn } from './interfaces/whatsapp-llm-conversation-turn.interface';
 import { WhatsappLocalMediaStorageService } from './whatsapp-local-media-storage.service';
 import { normalizeWaId } from './utils/normalize-wa-id.util';
 import { parseWhatsappTimestampSeconds } from './utils/message-timestamp.util';
@@ -30,6 +31,9 @@ interface NormalizedKapsoWebhook {
 }
 
 const MEDIA_TYPES = new Set(['image', 'video', 'audio', 'document', 'sticker']);
+
+/** Max stored messages to load into DeepSeek La Ceiba context (newest first, then reordered chronologically). */
+const LOTES_DEEPSEEK_HISTORY_MESSAGE_CAP = 40;
 
 /**
  * Persists WhatsApp chat headers and messages using Kapso-normalized webhook payloads and Kapso client for media download.
@@ -253,6 +257,55 @@ export class WsChatMsgHandlerService {
   }
 
   /**
+   * Builds user/assistant turns from persisted {@link WhatsappMessage} rows for La Ceiba DeepSeek context.
+   * Appends {@link input.fallbackUserText} when the latest inbound line is not yet stored (e.g. duplicate webhook).
+   */
+  public async buildRecentLlmConversation(input: {
+    waId: string;
+    phoneNumberId: string;
+    fallbackUserText: string;
+    maxMessages?: number;
+  }): Promise<readonly WhatsappLlmConversationTurn[]> {
+    const waIdNorm = normalizeWaId(input.waId);
+    const phoneNumberIdTrimmed = input.phoneNumberId.trim();
+    const cap = Math.min(
+      Math.max(input.maxMessages ?? LOTES_DEEPSEEK_HISTORY_MESSAGE_CAP, 1),
+      100,
+    );
+    const trimmedFallback = input.fallbackUserText.trim();
+    const singleUserFallback = (): readonly WhatsappLlmConversationTurn[] =>
+      trimmedFallback.length > 0 ? [{ role: 'user', content: trimmedFallback }] : [];
+    if (waIdNorm.length === 0 || phoneNumberIdTrimmed.length === 0) {
+      return singleUserFallback();
+    }
+    const chat = await this.chatModel
+      .findOne({ waId: waIdNorm, phoneNumberId: phoneNumberIdTrimmed })
+      .exec();
+    if (chat == null) {
+      return singleUserFallback();
+    }
+    const newestFirst = await this.messageModel
+      .find({ chat: chat._id })
+      .sort({ timestamp: -1, _id: -1 })
+      .limit(cap)
+      .exec();
+    const chronological = newestFirst.slice().reverse();
+    const turns: WhatsappLlmConversationTurn[] = [];
+    for (const doc of chronological) {
+      const content = this.resolveMessageTextForLlm(doc);
+      const role: 'user' | 'assistant' = doc.direction === 'inbound' ? 'user' : 'assistant';
+      turns.push({ role, content });
+    }
+    const last = turns[turns.length - 1];
+    const alreadyEndsWithCurrentUser =
+      last != null && last.role === 'user' && last.content === trimmedFallback;
+    if (trimmedFallback.length > 0 && !alreadyEndsWithCurrentUser) {
+      turns.push({ role: 'user', content: trimmedFallback });
+    }
+    return turns;
+  }
+
+  /**
    * Returns the WhatsApp user id for an existing chat document.
    */
   public async getWaIdByChatId(chatId: string): Promise<string> {
@@ -306,6 +359,19 @@ export class WsChatMsgHandlerService {
         ? msg.media.mimeType
         : 'application/octet-stream';
     return { absolutePath, mimeType };
+  }
+
+  private resolveMessageTextForLlm(doc: WhatsappMessageDocument): string {
+    const textBody = doc.textBody?.trim();
+    if (textBody != null && textBody.length > 0) {
+      return textBody;
+    }
+    const caption = doc.caption?.trim();
+    if (caption != null && caption.length > 0) {
+      return caption;
+    }
+    const type = typeof doc.type === 'string' && doc.type.length > 0 ? doc.type : 'message';
+    return `[${type}]`;
   }
 
   private resolveWaIdFromContacts(contacts: Array<Record<string, unknown>>): string {

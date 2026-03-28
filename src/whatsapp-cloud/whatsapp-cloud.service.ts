@@ -25,6 +25,13 @@ export class WhatsappCloudService {
     return id;
   }
 
+  /**
+   * Business phone number id from env (same key used when persisting outbound sends).
+   */
+  public getConfiguredPhoneNumberId(): string {
+    return this.getPhoneNumberId();
+  }
+
   private mapGraphErrorToHttp(err: unknown): never {
     if (err instanceof GraphApiError) {
       const status =

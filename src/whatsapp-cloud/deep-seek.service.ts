@@ -61,11 +61,12 @@ export class DeepSeekService {
   }
 
   /**
-   * Single-turn reply for La Ceiba WhatsApp-style chat using DeepSeek.
+   * La Ceiba WhatsApp-style reply using DeepSeek; optional multi-turn {@link input.conversation} from stored messages.
    */
   public async replyLotesChat(input: {
     userMessage: string;
     contactName?: string;
+    conversation?: ReadonlyArray<{ role: 'user' | 'assistant'; content: string }>;
     model?: string;
   }): Promise<string> {
     const system = this.getLotesChatSystemPrompt();
@@ -73,9 +74,19 @@ export class DeepSeekService {
       input.contactName != null && input.contactName.trim().length > 0
         ? `\n\n(Contexto: el nombre del contacto es ${input.contactName.trim()}.)`
         : '';
+    const systemPrompt = system + nameHint;
+    const trimmedUser = input.userMessage.trim();
+    const convo = input.conversation;
+    if (convo != null && convo.length > 0) {
+      return this.chatCompletionWithConversation({
+        systemPrompt,
+        conversation: convo,
+        model: input.model,
+      });
+    }
     return this.chatCompletion({
-      systemPrompt: system + nameHint,
-      userMessage: input.userMessage.trim(),
+      systemPrompt,
+      userMessage: trimmedUser,
       model: input.model ?? 'deepseek-chat',
     });
   }
@@ -90,12 +101,31 @@ export class DeepSeekService {
     temperature?: number;
     maxTokens?: number;
   }): Promise<string> {
+    return this.chatCompletionWithConversation({
+      systemPrompt: input.systemPrompt,
+      conversation: [{ role: 'user', content: input.userMessage }],
+      model: input.model,
+      temperature: input.temperature,
+      maxTokens: input.maxTokens,
+    });
+  }
+
+  /**
+   * Chat completion with system prompt and alternating user/assistant turns (chronological).
+   */
+  public async chatCompletionWithConversation(input: {
+    systemPrompt: string;
+    conversation: ReadonlyArray<{ role: 'user' | 'assistant'; content: string }>;
+    model?: string;
+    temperature?: number;
+    maxTokens?: number;
+  }): Promise<string> {
     const client = this.getOpenai();
     const completion = await client.chat.completions.create({
       model: input.model ?? 'deepseek-chat',
       messages: [
         { role: 'system', content: input.systemPrompt },
-        { role: 'user', content: input.userMessage },
+        ...input.conversation.map((m) => ({ role: m.role, content: m.content })),
       ],
       temperature: input.temperature ?? 0.7,
       max_tokens: input.maxTokens ?? 2000,
