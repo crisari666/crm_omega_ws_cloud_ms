@@ -643,6 +643,13 @@
     "@jridgewell/resolve-uri" "^3.1.0"
     "@jridgewell/sourcemap-codec" "^1.4.14"
 
+"@kapso/whatsapp-cloud-api@^0.2.1":
+  version "0.2.1"
+  resolved "https://registry.yarnpkg.com/@kapso/whatsapp-cloud-api/-/whatsapp-cloud-api-0.2.1.tgz#183d441f342f37a0facda0d80f182766790ba114"
+  integrity sha512-+piFK74eARsLqabxssAnMnWUyGPbO3oPhWrQNagu+70alo9RoapRNfzG9bx4nOOgxlKbv/c7s2mo2j8K3qq9kg==
+  dependencies:
+    zod "^4.1.11"
+
 "@ljharb/through@^2.3.12":
   version "2.3.14"
   resolved "https://registry.yarnpkg.com/@ljharb/through/-/through-2.3.14.tgz#a5df44295f44dc23bfe106af59426dd0677760b1"
@@ -5248,3 +5255,8 @@ yocto-queue@^0.1.0:
   version "0.1.0"
   resolved "https://registry.yarnpkg.com/yocto-queue/-/yocto-queue-0.1.0.tgz#0294eb3dee05028d31ee1a5fa2c556a6aaf10a1b"
   integrity sha512-rVksvsnNCdJ/ohGc6xgPwyN8eheCxsiLM8mxuE/t/mOVqJewPuO1miLpTHQiRgTKCLexL4MeAFVagts7HmNZ2Q==
+
+zod@^4.1.11:
+  version "4.3.6"
+  resolved "https://registry.yarnpkg.com/zod/-/zod-4.3.6.tgz#89c56e0aa7d2b05107d894412227087885ab112a"
+  integrity sha512-rftlrkhHZOcjDwkGlnUtZZkvaPHCsDATp4pGpuOOMDaTdDDXF91wuVDJoWoPsKX/3YPQ5fHuF3STjcYyKr+Qhg==

@@ -10,6 +10,7 @@ import {
   Inject,
 } from '@nestjs/common';
 import { WhatsappCloudService } from './whatsapp-cloud.service';
+import { WsChatMsgHandlerService } from './ws-chat-msg-handler.service';
 import { DeepSeekService } from './deep-seek.service';
 import { SendTextDto } from './dto/send-text.dto';
 import { SendHelloWorldTemplateDto } from './dto/send-hellow-world-template.dto';
@@ -31,6 +32,7 @@ export class WhatsappCloudController {
   public constructor(
     private readonly whatsappCloudService: WhatsappCloudService,
     private readonly deepSeekService: DeepSeekService,
+    private readonly wsChatMsgHandlerService: WsChatMsgHandlerService,
     @Inject('CRM_BACK_QUEUE') private readonly crmBackQueueClient: ClientProxy,
   ) {}
 
@@ -69,6 +71,12 @@ export class WhatsappCloudController {
     const firstChange = changes?.[0];
     const value = firstChange?.value as Record<string, unknown> | undefined;
     if (!value) return HttpStatus.OK;
+    try {
+      await this.wsChatMsgHandlerService.persistInboundWebhookPayload(dto);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      this.logger.warn(`persistInboundWebhookPayload failed: ${msg}`);
+    }
     // Button click webhook (interactive message)
     const messagesValue = value.messages as Array<Record<string, unknown>> | undefined;
     if (Array.isArray(messagesValue)) {

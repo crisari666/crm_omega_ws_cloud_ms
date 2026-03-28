@@ -3,5 +3,7 @@
  */
 export const WHATSAPP_ONBOARDING_WEBHOOK_CTAS = {
   greetingInterested: 'Estoy Interesado',
+  wantToKnowMore: 'Quiero saber',
   videoInterested: 'Interesado',
+
 } as const;

@@ -42,6 +42,9 @@ lerna-debug.log*
 .env.production.local
 .env.local
 
+# WhatsApp inbound media (local disk)
+/uploads
+
 # temp directory
 .temp
 .tmp

@@ -1,32 +1,21 @@
-import { HttpException, HttpStatus, Injectable, Logger } from '@nestjs/common';
+import { HttpException, HttpStatus, Inject, Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { HttpService } from '@nestjs/axios';
-import { firstValueFrom } from 'rxjs';
 import { format } from 'date-fns';
 import { enUS, es } from 'date-fns/locale';
+import { GraphApiError, WhatsAppClient } from '@kapso/whatsapp-cloud-api';
+import { WHATSAPP_CLIENT } from './constants/whatsapp-client.token';
 import { WhatsAppMessageTemplate } from './interfaces/message-template-type';
-import {
-  WhatsappCloudApiError,
-  WhatsappCloudTextMessagePayload,
-} from './interfaces/whatsapp-cloud-api-types';
+import { WsChatMsgHandlerService } from './ws-chat-msg-handler.service';
 
 @Injectable()
 export class WhatsappCloudService {
   private readonly logger = new Logger(WhatsappCloudService.name);
-  private readonly graphBaseUrl = 'https://graph.facebook.com';
 
-  constructor(
+  public constructor(
     private readonly configService: ConfigService,
-    private readonly httpService: HttpService,
+    @Inject(WHATSAPP_CLIENT) private readonly whatsAppClient: WhatsAppClient,
+    private readonly wsChatMsgHandlerService: WsChatMsgHandlerService,
   ) {}
-
-  private getAccessToken(): string {
-    const token = this.configService.get<string>('WHATSAPP_CLOUD_ACCESS_TOKEN');
-    if (!token) {
-      throw new Error('WHATSAPP_CLOUD_ACCESS_TOKEN is not configured');
-    }
-    return token;
-  }
 
   private getPhoneNumberId(): string {
     const id = this.configService.get<string>('WHATSAPP_CLOUD_PHONE_NUMBER_ID');
@@ -36,17 +25,25 @@ export class WhatsappCloudService {
     return id;
   }
 
-  private getApiVersion(): string {
-    return this.configService.get<string>('WHATSAPP_CLOUD_API_VERSION', 'v23.0');
+  private mapGraphErrorToHttp(err: unknown): never {
+    if (err instanceof GraphApiError) {
+      const status =
+        err.httpStatus >= 400 && err.httpStatus < 600 ? err.httpStatus : HttpStatus.BAD_GATEWAY;
+      throw new HttpException(err.message, status);
+    }
+    if (err instanceof HttpException) {
+      throw err;
+    }
+    throw new HttpException(
+      err instanceof Error ? err.message : 'WhatsApp Cloud request failed',
+      HttpStatus.INTERNAL_SERVER_ERROR,
+    );
   }
 
   private formatTrainingDateToSpanish(dateString: string): string {
     const dateObject: Date = new Date(dateString);
     if (Number.isNaN(dateObject.getTime())) {
-      throw new HttpException(
-        'Invalid training date',
-        HttpStatus.BAD_REQUEST,
-      );
+      throw new HttpException('Invalid training date', HttpStatus.BAD_REQUEST);
     }
     const capitalizeFirstLetter = (input: string): string => {
       const trimmedInput: string = input.trim();
@@ -56,44 +53,35 @@ export class WhatsappCloudService {
     const removeDiacritics = (input: string): string => {
       return input.normalize('NFD').replace(/\p{Diacritic}/gu, '');
     };
-
     const dayNameEs: string = format(dateObject, 'EEEE', { locale: es }).trim();
     const dayOfMonth: string = format(dateObject, 'd');
     const monthNameEs: string = format(dateObject, 'LLLL', { locale: es }).trim();
     const timeText: string = format(dateObject, 'h:mm a', { locale: enUS });
-
     const dayNameSpanishCapitalized: string = removeDiacritics(capitalizeFirstLetter(dayNameEs));
     const monthNameSpanishCapitalized: string = removeDiacritics(capitalizeFirstLetter(monthNameEs));
     return `${dayNameSpanishCapitalized} ${dayOfMonth} de ${monthNameSpanishCapitalized} a las ${timeText}`;
   }
 
   /**
-   * Send a simple text message using WhatsApp Cloud API
+   * Send a simple text message using Kapso WhatsApp client (Meta Graph).
    */
-  async sendTextMessage(to: string, body: string) {
+  public async sendTextMessage(to: string, body: string) {
+    const phoneNumberId = this.getPhoneNumberId();
     try {
-      const phoneNumberId = this.getPhoneNumberId();
-      const accessToken = this.getAccessToken();
-      const apiVersion = this.getApiVersion();
-      const url = `${this.graphBaseUrl}/${apiVersion}/${phoneNumberId}/messages`;
-      const payload: WhatsappCloudTextMessagePayload = {
-        messaging_product: 'whatsapp',
+      const data = await this.whatsAppClient.messages.sendText({
+        phoneNumberId,
         to,
+        body,
+        recipientType: 'individual',
+      });
+      this.logger.log(`📤 WhatsApp Cloud message sent to ${to}: ${JSON.stringify(data)}`);
+      await this.wsChatMsgHandlerService.persistOutboundAfterSend({
+        toWaId: to,
+        phoneNumberId,
+        response: data,
         type: 'text',
-        text: { body },
-      };
-      const response = await firstValueFrom(
-        this.httpService.post(url, payload, {
-          headers: {
-            'Content-Type': 'application/json',
-            Authorization: `Bearer ${accessToken}`,
-          },
-        }),
-      );
-      const data = response.data;
-      this.logger.log(
-        `📤 WhatsApp Cloud message sent to ${to}: ${JSON.stringify(data)}`,
-      );
+        textBody: body,
+      });
       return {
         success: true,
         to,
@@ -101,73 +89,40 @@ export class WhatsappCloudService {
         raw: data,
       };
     } catch (error) {
-      const axiosError = error as { response?: { status: number; data?: WhatsappCloudApiError } };
-      this.logger.error(
-        `Error sending WhatsApp Cloud message: ${(error as Error).message}`,
-      );
-      if (axiosError.response) {
-        const apiError = axiosError.response.data as WhatsappCloudApiError;
-        throw new HttpException(
-          apiError?.error?.message || 'Failed to send WhatsApp Cloud message',
-          HttpStatus.BAD_GATEWAY,
-        );
-      }
-      if (error instanceof HttpException) {
-        throw error;
-      }
-      throw new HttpException(
-        'Failed to send WhatsApp Cloud message',
-        HttpStatus.INTERNAL_SERVER_ERROR,
-      );
+      this.logger.error(`Error sending WhatsApp Cloud message: ${(error as Error).message}`);
+      this.mapGraphErrorToHttp(error);
     }
   }
 
   /**
-   * Send a template message using WhatsApp Cloud API
+   * Send a template message using Kapso sendRaw (preserves existing Meta JSON shape).
    */
-  async msgTemplate(messageTemplate: WhatsAppMessageTemplate) {
+  public async msgTemplate(messageTemplate: WhatsAppMessageTemplate) {
+    const phoneNumberId = this.getPhoneNumberId();
     try {
-      const url = `${this.graphBaseUrl}/${this.getApiVersion()}/${this.getPhoneNumberId()}/messages`;
-      console.log('messageTemplate', JSON.stringify(messageTemplate, null, 2));
-      console.log('url', url);
-      const response = await firstValueFrom(
-        this.httpService.post(url, messageTemplate, {
-          headers: {
-            'Content-Type': 'application/json',
-            Authorization: `Bearer ${this.getAccessToken()}`,
-          },
-        }),
-      );
+      this.logger.log(`messageTemplate ${JSON.stringify(messageTemplate)}`);
+      const data = await this.whatsAppClient.messages.sendRaw({
+        phoneNumberId,
+        payload: messageTemplate as unknown as Record<string, unknown>,
+      });
       this.logger.log(
-        `📤 WhatsApp Cloud template sent ${messageTemplate.template.name} to ${messageTemplate.to}: ${JSON.stringify(response.data)}`,
+        `📤 WhatsApp Cloud template sent ${messageTemplate.template.name} to ${messageTemplate.to}: ${JSON.stringify(data)}`,
       );
-      return response.data;
+      await this.wsChatMsgHandlerService.persistOutboundAfterSend({
+        toWaId: messageTemplate.to,
+        phoneNumberId,
+        response: data,
+        type: 'template',
+        textBody: messageTemplate.template.name,
+      });
+      return data;
     } catch (error) {
-      const axiosError = error as { response?: { data?: WhatsappCloudApiError } };
-      this.logger.error(
-        `Error sending WhatsApp Cloud template: ${(error as Error).message}`,
-      );
-      if (axiosError.response?.data) {
-        this.logger.error(
-          `WhatsApp Cloud API error: ${JSON.stringify(axiosError.response.data)}`,
-        );
-        throw new HttpException(
-          (axiosError.response.data as WhatsappCloudApiError)?.error?.message ||
-            'Failed to send WhatsApp Cloud template',
-          HttpStatus.BAD_GATEWAY,
-        );
-      }
-      throw new HttpException(
-        'Failed to send WhatsApp Cloud template',
-        HttpStatus.INTERNAL_SERVER_ERROR,
-      );
+      this.logger.error(`Error sending WhatsApp Cloud template: ${(error as Error).message}`);
+      this.mapGraphErrorToHttp(error);
     }
   }
 
-  /**
-   * Send the \"initial_video\" template using WhatsApp Cloud API
-   */
-  async sendInitialVideoTemplate(name: string, phoneNumber: string) {
+  public async sendInitialVideoTemplate(name: string, phoneNumber: string) {
     const templateMessage: WhatsAppMessageTemplate = {
       to: phoneNumber,
       messaging_product: 'whatsapp',
@@ -195,7 +150,7 @@ export class WhatsappCloudService {
     return this.msgTemplate(templateMessage);
   }
 
-  async sendHelloWorldTemplate(phoneNumber: string) {
+  public async sendHelloWorldTemplate(phoneNumber: string) {
     const templateMessage: WhatsAppMessageTemplate = {
       messaging_product: 'whatsapp',
       to: phoneNumber,
@@ -211,9 +166,17 @@ export class WhatsappCloudService {
     return this.msgTemplate(templateMessage);
   }
 
-
-
-  async sendTemplateInfoTrainingMessage({code, name, date, to}: {code: string, name: string, date: string, to: string}) {
+  public async sendTemplateInfoTrainingMessage({
+    code,
+    name,
+    date,
+    to,
+  }: {
+    code: string;
+    name: string;
+    date: string;
+    to: string;
+  }) {
     this.logger.log(
       `[sendTemplateProposalMessage] Sending proposal to ${to} (name: ${name}, date: ${date})`,
     );
@@ -253,15 +216,15 @@ export class WhatsappCloudService {
                 type: 'text',
                 text: code,
               },
-            ]
-        }
-        ]
+            ],
+          },
+        ],
       },
     };
     return this.msgTemplate(templateMessage);
   }
 
-  async sendTemplateGreetingMessage(phoneNumber: string, name: string) {
+  public async sendTemplateGreetingMessage(phoneNumber: string, name: string) {
     const templateMessage: WhatsAppMessageTemplate = {
       to: phoneNumber,
       messaging_product: 'whatsapp',
@@ -270,7 +233,7 @@ export class WhatsappCloudService {
       template: {
         name: 'saludo_estudiante',
         language: {
-          code: 'es',
+          code: 'es_CO',
         },
         components: [
           {
@@ -286,19 +249,14 @@ export class WhatsappCloudService {
         ],
       },
     };
-    console.log('templateMessage', JSON.stringify(templateMessage, null, 2));
+    this.logger.log(`templateMessage ${JSON.stringify(templateMessage, null, 2)}`);
     return this.msgTemplate(templateMessage);
-
   }
 
   /**
    * Sends `video_msj` with a header video. Meta requires an uploaded **media id** (`video.id`).
-   * The id is supplied by the caller (onboarding sends it from `omega_office_back` via Rabbit or REST body).
    */
-  async sendTemplateVideoMessage(
-    phoneNumber: string,
-    videoMediaId: string,
-  ): Promise<unknown> {
+  public async sendTemplateVideoMessage(phoneNumber: string, videoMediaId: string): Promise<unknown> {
     const resolvedId = videoMediaId.trim();
     if (resolvedId.length === 0) {
       throw new HttpException(
@@ -334,7 +292,7 @@ export class WhatsappCloudService {
     return this.msgTemplate(templateMessage);
   }
 
-  async sendTemplateCallNotificationMessage(input: {
+  public async sendTemplateCallNotificationMessage(input: {
     phoneNumber: string;
     contactName: string;
   }) {
@@ -365,5 +323,166 @@ export class WhatsappCloudService {
     return this.msgTemplate(templateMessage);
   }
 
-}
+  /**
+   * Sends an image message (id or link) via Kapso; persists outbound row.
+   */
+  public async sendImageMessage(input: {
+    to: string;
+    image: { id?: string; link?: string; caption?: string };
+  }) {
+    const phoneNumberId = this.getPhoneNumberId();
+    try {
+      const data = await this.whatsAppClient.messages.sendImage({
+        phoneNumberId,
+        to: input.to,
+        recipientType: 'individual',
+        image: input.image,
+      });
+      await this.wsChatMsgHandlerService.persistOutboundAfterSend({
+        toWaId: input.to,
+        phoneNumberId,
+        response: data,
+        type: 'image',
+        caption: input.image.caption,
+        media: {
+          whatsappMediaId: input.image.id,
+        },
+      });
+      return data;
+    } catch (error) {
+      this.mapGraphErrorToHttp(error);
+    }
+  }
 
+  /**
+   * Sends a document message via Kapso; persists outbound row.
+   */
+  public async sendDocumentMessage(input: {
+    to: string;
+    document: { id?: string; link?: string; caption?: string; filename?: string };
+  }) {
+    const phoneNumberId = this.getPhoneNumberId();
+    try {
+      const data = await this.whatsAppClient.messages.sendDocument({
+        phoneNumberId,
+        to: input.to,
+        recipientType: 'individual',
+        document: input.document,
+      });
+      await this.wsChatMsgHandlerService.persistOutboundAfterSend({
+        toWaId: input.to,
+        phoneNumberId,
+        response: data,
+        type: 'document',
+        caption: input.document.caption,
+        media: {
+          whatsappMediaId: input.document.id,
+          filename: input.document.filename,
+        },
+      });
+      return data;
+    } catch (error) {
+      this.mapGraphErrorToHttp(error);
+    }
+  }
+
+  /**
+   * Sends a video message via Kapso; persists outbound row.
+   */
+  public async sendVideoMessage(input: {
+    to: string;
+    video: { id?: string; link?: string; caption?: string };
+  }) {
+    const phoneNumberId = this.getPhoneNumberId();
+    try {
+      const data = await this.whatsAppClient.messages.sendVideo({
+        phoneNumberId,
+        to: input.to,
+        recipientType: 'individual',
+        video: input.video,
+      });
+      await this.wsChatMsgHandlerService.persistOutboundAfterSend({
+        toWaId: input.to,
+        phoneNumberId,
+        response: data,
+        type: 'video',
+        caption: input.video.caption,
+        media: { whatsappMediaId: input.video.id },
+      });
+      return data;
+    } catch (error) {
+      this.mapGraphErrorToHttp(error);
+    }
+  }
+
+  /**
+   * Sends an audio message via Kapso; persists outbound row.
+   */
+  public async sendAudioMessage(input: {
+    to: string;
+    audio: { id?: string; link?: string; voice?: boolean };
+  }) {
+    const phoneNumberId = this.getPhoneNumberId();
+    try {
+      const data = await this.whatsAppClient.messages.sendAudio({
+        phoneNumberId,
+        to: input.to,
+        recipientType: 'individual',
+        audio: input.audio,
+      });
+      await this.wsChatMsgHandlerService.persistOutboundAfterSend({
+        toWaId: input.to,
+        phoneNumberId,
+        response: data,
+        type: 'audio',
+        media: { whatsappMediaId: input.audio.id },
+      });
+      return data;
+    } catch (error) {
+      this.mapGraphErrorToHttp(error);
+    }
+  }
+
+  /**
+   * Sends a sticker message via Kapso; persists outbound row.
+   */
+  public async sendStickerMessage(input: { to: string; sticker: { id?: string; link?: string } }) {
+    const phoneNumberId = this.getPhoneNumberId();
+    try {
+      const data = await this.whatsAppClient.messages.sendSticker({
+        phoneNumberId,
+        to: input.to,
+        recipientType: 'individual',
+        sticker: input.sticker,
+      });
+      await this.wsChatMsgHandlerService.persistOutboundAfterSend({
+        toWaId: input.to,
+        phoneNumberId,
+        response: data,
+        type: 'sticker',
+        media: { whatsappMediaId: input.sticker.id },
+      });
+      return data;
+    } catch (error) {
+      this.mapGraphErrorToHttp(error);
+    }
+  }
+
+  /**
+   * Uploads media bytes to WhatsApp and returns the media id.
+   */
+  public async uploadMediaFile(input: { type: string; file: Buffer; fileName?: string }) {
+    const phoneNumberId = this.getPhoneNumberId();
+    try {
+      return await this.whatsAppClient.media.upload({
+        phoneNumberId,
+        type: input.type,
+        file: input.file,
+        fileName: input.fileName,
+        messagingProduct: 'whatsapp',
+      });
+    } catch (error) {
+      this.mapGraphErrorToHttp(error);
+    }
+  }
+}
