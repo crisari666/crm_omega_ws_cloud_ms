@@ -6,6 +6,7 @@ import { WHATSAPP_CLIENT } from './constants/whatsapp-client.token';
 import { WhatsappChat } from './schemas/whatsapp-chat.schema';
 import { WhatsappMessage } from './schemas/whatsapp-message.schema';
 import { WhatsappLocalMediaStorageService } from './whatsapp-local-media-storage.service';
+import type { LotesChatDuplicateInboundSuppression } from './interfaces/lotes-chat-duplicate-inbound-suppression.interface';
 import { WsChatMsgHandlerService } from './ws-chat-msg-handler.service';
 
 describe('WsChatMsgHandlerService', () => {
@@ -130,5 +131,114 @@ describe('WsChatMsgHandlerService', () => {
       { role: 'user', content: inputCurrentText },
     ];
     expect(actual).toEqual(expected);
+  });
+
+  it('shouldSkipLlmReplyForDuplicateInbound returns false when suppression disabled', async () => {
+    const suppression: LotesChatDuplicateInboundSuppression = {
+      enabled: false,
+      windowSeconds: 60,
+      minTextLength: 1,
+    };
+    const actual = await service.shouldSkipLlmReplyForDuplicateInbound({
+      waId: '521',
+      phoneNumberId: 'pn1',
+      currentTextBody: 'same',
+      suppression,
+    });
+    expect(actual).toBe(false);
+    expect(mockChatModel.findOne).not.toHaveBeenCalled();
+  });
+
+  it('shouldSkipLlmReplyForDuplicateInbound returns false when text shorter than minTextLength', async () => {
+    const suppression: LotesChatDuplicateInboundSuppression = {
+      enabled: true,
+      windowSeconds: 3600,
+      minTextLength: 10,
+    };
+    const actual = await service.shouldSkipLlmReplyForDuplicateInbound({
+      waId: '521',
+      phoneNumberId: 'pn1',
+      currentTextBody: 'short',
+      suppression,
+    });
+    expect(actual).toBe(false);
+  });
+
+  it('shouldSkipLlmReplyForDuplicateInbound returns true when two consecutive identical inbounds fall in window', async () => {
+    const chatId = new Types.ObjectId();
+    mockChatModel.findOne.mockReturnValue({
+      exec: jest.fn().mockResolvedValue({ _id: chatId, waId: '521', phoneNumberId: 'pn1' }),
+    });
+    const t1 = new Date('2026-03-28T10:00:00.000Z');
+    const t2 = new Date('2026-03-28T10:05:00.000Z');
+    messageFindChain.exec.mockResolvedValue([
+      { direction: 'inbound', type: 'text', textBody: 'Auto away message', caption: undefined, timestamp: t2 },
+      { direction: 'inbound', type: 'text', textBody: 'Auto away message', caption: undefined, timestamp: t1 },
+    ]);
+    mockMessageModel.find.mockReturnValue(messageFindChain);
+    const suppression: LotesChatDuplicateInboundSuppression = {
+      enabled: true,
+      windowSeconds: 7200,
+      minTextLength: 5,
+    };
+    const actual = await service.shouldSkipLlmReplyForDuplicateInbound({
+      waId: '521',
+      phoneNumberId: 'pn1',
+      currentTextBody: 'Auto away message',
+      suppression,
+    });
+    expect(actual).toBe(true);
+  });
+
+  it('shouldSkipLlmReplyForDuplicateInbound returns false when previous inbound text differs', async () => {
+    const chatId = new Types.ObjectId();
+    mockChatModel.findOne.mockReturnValue({
+      exec: jest.fn().mockResolvedValue({ _id: chatId, waId: '521', phoneNumberId: 'pn1' }),
+    });
+    const t1 = new Date('2026-03-28T10:00:00.000Z');
+    const t2 = new Date('2026-03-28T10:05:00.000Z');
+    messageFindChain.exec.mockResolvedValue([
+      { direction: 'inbound', type: 'text', textBody: 'Second', caption: undefined, timestamp: t2 },
+      { direction: 'inbound', type: 'text', textBody: 'First', caption: undefined, timestamp: t1 },
+    ]);
+    mockMessageModel.find.mockReturnValue(messageFindChain);
+    const suppression: LotesChatDuplicateInboundSuppression = {
+      enabled: true,
+      windowSeconds: 7200,
+      minTextLength: 1,
+    };
+    const actual = await service.shouldSkipLlmReplyForDuplicateInbound({
+      waId: '521',
+      phoneNumberId: 'pn1',
+      currentTextBody: 'Second',
+      suppression,
+    });
+    expect(actual).toBe(false);
+  });
+
+  it('shouldSkipLlmReplyForDuplicateInbound returns false when gap exceeds windowSeconds', async () => {
+    const chatId = new Types.ObjectId();
+    mockChatModel.findOne.mockReturnValue({
+      exec: jest.fn().mockResolvedValue({ _id: chatId, waId: '521', phoneNumberId: 'pn1' }),
+    });
+    const t1 = new Date('2026-03-28T10:00:00.000Z');
+    const t2 = new Date('2026-03-28T12:30:00.000Z');
+    messageFindChain.exec.mockResolvedValue([
+      { direction: 'inbound', type: 'text', textBody: 'Repeat', caption: undefined, timestamp: t2 },
+      { direction: 'inbound', type: 'text', textBody: 'Repeat', caption: undefined, timestamp: t1 },
+    ]);
+    mockMessageModel.find.mockReturnValue(messageFindChain);
+    const suppression: LotesChatDuplicateInboundSuppression = {
+      enabled: true,
+      windowSeconds: 3600,
+      minTextLength: 1,
+    };
+    const actual = await service.shouldSkipLlmReplyForDuplicateInbound({
+      waId: '521',
+      phoneNumberId: 'pn1',
+      currentTextBody: 'Repeat',
+      suppression,
+    });
+    expect(actual).toBe(false);
   });
 });

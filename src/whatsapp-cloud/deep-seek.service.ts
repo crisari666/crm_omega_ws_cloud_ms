@@ -3,19 +3,40 @@ import * as path from 'path';
 import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import OpenAI from 'openai';
+import type { ChatCompletionMessageParam, ChatCompletionTool } from 'openai/resources/chat/completions';
+import { COMPANY_PUBLIC_CONTACT_INFO } from '../constants/app-constants';
+import { LotesChatDuplicateInboundSuppression } from './interfaces/lotes-chat-duplicate-inbound-suppression.interface';
 import { ProjectResponse } from './interfaces/project-config.interface';
+import { buildCompanyInformationToolResponse } from './utils/build-company-information-tool-response.util';
+
+type LotesChatConfigFunctionJson = {
+  name?: string;
+  description?: string;
+  parameters?: Record<string, unknown>;
+};
 
 type LotesChatConfigShape = {
-  agent?: { think?: { prompt?: string } };
+  agent?: {
+    think?: { prompt?: string; functions?: ReadonlyArray<LotesChatConfigFunctionJson> };
+    duplicateInboundSuppression?: {
+      enabled?: boolean;
+      windowSeconds?: number;
+      minTextLength?: number;
+    };
+  };
 };
 
 const DEFAULT_LOTE_CHAT_CONFIG_PATH = 'config_lotes_chat.json';
+const DEFAULT_DUPLICATE_SUPPRESSION_WINDOW_SECONDS = 3600;
+const DEFAULT_DUPLICATE_SUPPRESSION_MIN_TEXT_LENGTH = 3;
+const LOTES_CHAT_TOOL_ROUNDS_MAX = 6;
 
 @Injectable()
 export class DeepSeekService {
   private readonly logger = new Logger(DeepSeekService.name);
   private openaiClient: OpenAI | null = null;
   private cachedLotesSystemPrompt: string | null = null;
+  private cachedLotesChatConfig: LotesChatConfigShape | null = null;
 
   public constructor(private readonly configService: ConfigService) {}
 
@@ -39,11 +60,11 @@ export class DeepSeekService {
   }
 
   /**
-   * System prompt from `config_lotes_chat.json` (agent.think.prompt). Path override: LOTE_CHAT_CONFIG_PATH.
+   * Parsed `config_lotes_chat.json` (cached). Path override: LOTE_CHAT_CONFIG_PATH.
    */
-  public getLotesChatSystemPrompt(): string {
-    if (this.cachedLotesSystemPrompt != null) {
-      return this.cachedLotesSystemPrompt;
+  private loadLotesChatConfig(): LotesChatConfigShape {
+    if (this.cachedLotesChatConfig != null) {
+      return this.cachedLotesChatConfig;
     }
     const configuredPath =
       this.configService.get<string>('LOTE_CHAT_CONFIG_PATH') ?? DEFAULT_LOTE_CHAT_CONFIG_PATH;
@@ -51,9 +72,25 @@ export class DeepSeekService {
       ? configuredPath
       : path.join(process.cwd(), configuredPath);
     const raw = fs.readFileSync(resolvedPath, 'utf8');
-    const parsed = JSON.parse(raw) as LotesChatConfigShape;
+    this.cachedLotesChatConfig = JSON.parse(raw) as LotesChatConfigShape;
+    return this.cachedLotesChatConfig;
+  }
+
+  /**
+   * System prompt from `config_lotes_chat.json` (agent.think.prompt). Path override: LOTE_CHAT_CONFIG_PATH.
+   */
+  public getLotesChatSystemPrompt(): string {
+    if (this.cachedLotesSystemPrompt != null) {
+      return this.cachedLotesSystemPrompt;
+    }
+    const parsed = this.loadLotesChatConfig();
     const prompt = parsed.agent?.think?.prompt;
     if (prompt == null || prompt.trim().length === 0) {
+      const configuredPath =
+        this.configService.get<string>('LOTE_CHAT_CONFIG_PATH') ?? DEFAULT_LOTE_CHAT_CONFIG_PATH;
+      const resolvedPath = path.isAbsolute(configuredPath)
+        ? configuredPath
+        : path.join(process.cwd(), configuredPath);
       throw new Error(`Missing agent.think.prompt in ${resolvedPath}`);
     }
     this.cachedLotesSystemPrompt = prompt;
@@ -61,7 +98,58 @@ export class DeepSeekService {
   }
 
   /**
+   * Duplicate inbound suppression from `config_lotes_chat.json` (agent.duplicateInboundSuppression).
+   */
+  public getLotesChatDuplicateInboundSuppression(): LotesChatDuplicateInboundSuppression {
+    const parsed = this.loadLotesChatConfig();
+    const raw = parsed.agent?.duplicateInboundSuppression;
+    const enabled = raw?.enabled === true;
+    const windowSeconds =
+      typeof raw?.windowSeconds === 'number' && raw.windowSeconds > 0
+        ? raw.windowSeconds
+        : DEFAULT_DUPLICATE_SUPPRESSION_WINDOW_SECONDS;
+    const minTextLength =
+      typeof raw?.minTextLength === 'number' && raw.minTextLength >= 1
+        ? raw.minTextLength
+        : DEFAULT_DUPLICATE_SUPPRESSION_MIN_TEXT_LENGTH;
+    return { enabled, windowSeconds, minTextLength };
+  }
+
+  /**
+   * OpenAI-style tool definitions from `config_lotes_chat.json` (agent.think.functions).
+   */
+  private getLotesChatToolDefinitions(): ChatCompletionTool[] {
+    const parsed = this.loadLotesChatConfig();
+    const raw = parsed.agent?.think?.functions;
+    if (!Array.isArray(raw) || raw.length === 0) {
+      return [];
+    }
+    const tools: ChatCompletionTool[] = [];
+    for (const item of raw) {
+      const name = typeof item?.name === 'string' ? item.name.trim() : '';
+      if (name.length === 0) {
+        continue;
+      }
+      const description = typeof item.description === 'string' ? item.description : '';
+      const parameters =
+        item.parameters != null && typeof item.parameters === 'object' && !Array.isArray(item.parameters)
+          ? item.parameters
+          : { type: 'object', properties: {} };
+      tools.push({
+        type: 'function',
+        function: {
+          name,
+          description: description.length > 0 ? description : undefined,
+          parameters: parameters as Record<string, unknown>,
+        },
+      });
+    }
+    return tools;
+  }
+
+  /**
    * La Ceiba WhatsApp-style reply using DeepSeek; optional multi-turn {@link input.conversation} from stored messages.
+   * When the config defines `functions`, runs tool rounds (e.g. {@link buildCompanyInformationToolResponse}).
    */
   public async replyLotesChat(input: {
     userMessage: string;
@@ -77,6 +165,17 @@ export class DeepSeekService {
     const systemPrompt = system + nameHint;
     const trimmedUser = input.userMessage.trim();
     const convo = input.conversation;
+    const tools = this.getLotesChatToolDefinitions();
+    if (tools.length > 0) {
+      return this.replyLotesChatWithTools({
+        systemPrompt,
+        trimmedUser,
+        conversation: convo,
+        tools,
+        model: input.model ?? 'deepseek-chat',
+        contactName: input.contactName,
+      });
+    }
     if (convo != null && convo.length > 0) {
       return this.chatCompletionWithConversation({
         systemPrompt,
@@ -89,6 +188,110 @@ export class DeepSeekService {
       userMessage: trimmedUser,
       model: input.model ?? 'deepseek-chat',
     });
+  }
+
+  private async replyLotesChatWithTools(input: {
+    systemPrompt: string;
+    trimmedUser: string;
+    conversation?: ReadonlyArray<{ role: 'user' | 'assistant'; content: string }>;
+    tools: ChatCompletionTool[];
+    model: string;
+    contactName?: string;
+  }): Promise<string> {
+    const client = this.getOpenai();
+    const convoMessages: ChatCompletionMessageParam[] =
+      input.conversation != null && input.conversation.length > 0
+        ? input.conversation.map((m) => ({ role: m.role, content: m.content }))
+        : [{ role: 'user', content: input.trimmedUser }];
+    const messages: ChatCompletionMessageParam[] = [
+      { role: 'system', content: input.systemPrompt },
+      ...convoMessages,
+    ];
+    let round = 0;
+    while (round < LOTES_CHAT_TOOL_ROUNDS_MAX) {
+      round += 1;
+      const completion = await client.chat.completions.create({
+        model: input.model,
+        messages,
+        tools: input.tools,
+        tool_choice: 'auto',
+        temperature: 0.7,
+        max_tokens: 2000,
+      });
+      const choice = completion.choices[0];
+      const msg = choice?.message;
+      if (msg == null) {
+        return '';
+      }
+      const toolCalls = msg.tool_calls;
+      if (toolCalls != null && toolCalls.length > 0) {
+        messages.push({
+          role: 'assistant',
+          content: msg.content,
+          tool_calls: toolCalls,
+        });
+        for (const tc of toolCalls) {
+          const toolName = tc.type === 'function' ? tc.function.name : '';
+          const argsJson = tc.type === 'function' ? tc.function.arguments : '{}';
+          const toolContent = this.executeLotesChatToolCall({
+            toolName,
+            argumentsJson: argsJson,
+            contactName: input.contactName,
+          });
+          messages.push({
+            role: 'tool',
+            tool_call_id: tc.id,
+            content: toolContent,
+          });
+        }
+        continue;
+      }
+      const text = msg.content?.trim() ?? '';
+      if (text.length === 0) {
+        this.logger.warn('DeepSeek returned empty assistant content (tools path)');
+      }
+      return text;
+    }
+    this.logger.warn(`La Ceiba chat tool loop exceeded ${LOTES_CHAT_TOOL_ROUNDS_MAX} rounds`);
+    return '';
+  }
+
+  private executeLotesChatToolCall(input: {
+    toolName: string;
+    argumentsJson: string;
+    contactName?: string;
+  }): string {
+    const name = input.toolName.trim();
+    if (name === 'companyInformation') {
+      return buildCompanyInformationToolResponse(COMPANY_PUBLIC_CONTACT_INFO);
+    }
+    if (name === 'getContactName') {
+      const contact =
+        input.contactName != null && input.contactName.trim().length > 0
+          ? input.contactName.trim()
+          : '';
+      return JSON.stringify({
+        contactName: contact,
+        note:
+          contact.length > 0
+            ? 'Usa este nombre para personalizar (CUSTOMER_NAME).'
+            : 'Sin nombre en contexto; saluda de forma neutral.',
+      });
+    }
+    if (name === 'disabledUser') {
+      return JSON.stringify({
+        ok: true,
+        note: 'El usuario quedó marcado como no interesado en el flujo; despídete con respeto.',
+      });
+    }
+    if (name === 'scheduleAppointment') {
+      return JSON.stringify({
+        ok: true,
+        note: 'La intención de agendar quedó registrada en la conversación; confirma el siguiente paso con el usuario.',
+      });
+    }
+    this.logger.warn(`Unhandled La Ceiba tool call: ${name}`);
+    return JSON.stringify({ error: 'Herramienta no implementada', tool: name });
   }
 
   /**

@@ -11,7 +11,9 @@ import {
   WhatsappMessageMedia,
 } from './schemas/whatsapp-message.schema';
 import type { PaginatedResult } from './types/paginated-result.type';
+import type { LotesChatDuplicateInboundSuppression } from './interfaces/lotes-chat-duplicate-inbound-suppression.interface';
 import type { WhatsappLlmConversationTurn } from './interfaces/whatsapp-llm-conversation-turn.interface';
+import { normalizeInboundTextForDuplicateCompare } from './utils/normalize-inbound-text-for-duplicate-compare.util';
 import { WhatsappLocalMediaStorageService } from './whatsapp-local-media-storage.service';
 import { normalizeWaId } from './utils/normalize-wa-id.util';
 import { parseWhatsappTimestampSeconds } from './utils/message-timestamp.util';
@@ -254,6 +256,62 @@ export class WsChatMsgHandlerService {
     const items = hasMore ? rows.slice(0, limit) : rows;
     const nextCursor = hasMore ? String(items[items.length - 1]._id) : null;
     return { items, nextCursor, hasMore };
+  }
+
+  /**
+   * When enabled in config, skips an LLM reply if the latest inbound text matches the previous inbound text
+   * within {@link LotesChatDuplicateInboundSuppression.windowSeconds} (reduces loops with auto-replies).
+   */
+  public async shouldSkipLlmReplyForDuplicateInbound(input: {
+    waId: string;
+    phoneNumberId: string;
+    currentTextBody: string;
+    suppression: LotesChatDuplicateInboundSuppression;
+  }): Promise<boolean> {
+    if (!input.suppression.enabled) {
+      return false;
+    }
+    const waIdNorm = normalizeWaId(input.waId);
+    const phoneNumberIdTrimmed = input.phoneNumberId.trim();
+    const normalizedCurrent = normalizeInboundTextForDuplicateCompare(input.currentTextBody);
+    if (normalizedCurrent.length < input.suppression.minTextLength) {
+      return false;
+    }
+    if (waIdNorm.length === 0 || phoneNumberIdTrimmed.length === 0) {
+      return false;
+    }
+    const chat = await this.chatModel
+      .findOne({ waId: waIdNorm, phoneNumberId: phoneNumberIdTrimmed })
+      .exec();
+    if (chat == null) {
+      return false;
+    }
+    const lastTwoInbound = await this.messageModel
+      .find({ chat: chat._id, direction: 'inbound' })
+      .sort({ timestamp: -1, _id: -1 })
+      .limit(2)
+      .exec();
+    if (lastTwoInbound.length < 2) {
+      return false;
+    }
+    const newest = lastTwoInbound[0];
+    const previous = lastTwoInbound[1];
+    const newestNorm = normalizeInboundTextForDuplicateCompare(this.resolveMessageTextForLlm(newest));
+    if (newestNorm !== normalizedCurrent) {
+      return false;
+    }
+    const previousNorm = normalizeInboundTextForDuplicateCompare(this.resolveMessageTextForLlm(previous));
+    if (previousNorm !== normalizedCurrent) {
+      return false;
+    }
+    const newestTs = newest.timestamp instanceof Date ? newest.timestamp.getTime() : 0;
+    const previousTs = previous.timestamp instanceof Date ? previous.timestamp.getTime() : 0;
+    const deltaMs = newestTs - previousTs;
+    if (deltaMs < 0) {
+      return false;
+    }
+    const windowMs = input.suppression.windowSeconds * 1000;
+    return deltaMs <= windowMs;
   }
 
   /**

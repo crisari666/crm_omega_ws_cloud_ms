@@ -236,6 +236,19 @@ export class WhatsappCloudController {
   }): Promise<void> {
     if (input.waId.length === 0) return;
     try {
+      const suppression = this.deepSeekService.getLotesChatDuplicateInboundSuppression();
+      const skipDuplicate = await this.wsChatMsgHandlerService.shouldSkipLlmReplyForDuplicateInbound({
+        waId: input.waId,
+        phoneNumberId: input.phoneNumberId,
+        currentTextBody: input.textBody,
+        suppression,
+      });
+      if (skipDuplicate) {
+        this.logger.debug(
+          `Skipping DeepSeek La Ceiba reply: duplicate inbound text within window (waId=${input.waId})`,
+        );
+        return;
+      }
       const conversation = await this.wsChatMsgHandlerService.buildRecentLlmConversation({
         waId: input.waId,
         phoneNumberId: input.phoneNumberId,
