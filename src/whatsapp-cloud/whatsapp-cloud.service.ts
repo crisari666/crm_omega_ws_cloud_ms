@@ -268,9 +268,9 @@ export class WhatsappCloudService {
       recipient_type: 'individual',
       type: 'template',
       template: {
-        name: 'saludo_aspirante',
+        name: 'saludo_estudiante',
         language: {
-          code: 'en',
+          code: 'es',
         },
         components: [
           {
