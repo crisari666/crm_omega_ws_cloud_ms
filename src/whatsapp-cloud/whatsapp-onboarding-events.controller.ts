@@ -61,6 +61,18 @@ export class WhatsappOnboardingEventsController {
     if (actionValue === 'send.import_sequence_step') {
       return this.handleSendImportSequenceStep(payload);
     }
+    if (actionValue === 'send.confirmar_capacitacion') {
+      await this.handleSendConfirmarCapacitacion(payload);
+      return { success: true };
+    }
+    if (actionValue === 'send.interactive_training_slots') {
+      await this.handleSendInteractiveTrainingSlots(payload);
+      return { success: true };
+    }
+    if (actionValue === 'send.whatsapp_text') {
+      await this.handleSendWhatsappText(payload);
+      return { success: true };
+    }
     return { success: false, message: 'unsupported action' };
   }
 
@@ -238,6 +250,78 @@ export class WhatsappOnboardingEventsController {
       } as CrmBackEventPayload),
     );
     return true;
+  }
+
+  private async handleSendConfirmarCapacitacion(payload: Record<string, unknown>): Promise<void> {
+    const flowId = payload.flowId != null ? String(payload.flowId) : '';
+    const userId = payload.userId != null ? String(payload.userId) : '';
+    const phoneNumber = payload.phoneNumber != null ? String(payload.phoneNumber) : '';
+    const name = payload.name != null ? String(payload.name) : '';
+    if (!flowId || !userId || !phoneNumber || !name) {
+      return;
+    }
+    const response = await this.whatsappCloudService.sendTemplateConfirmarCapacitacionMessage({
+      phoneNumber,
+      contactName: name,
+    });
+    const confirmarCapacitacionMessageId = extractFirstMessageId(response);
+    if (confirmarCapacitacionMessageId == null) {
+      console.error(
+        'handleSendConfirmarCapacitacion: Graph API did not return a message id; skip CRM dispatch event',
+      );
+      return;
+    }
+    await lastValueFrom(
+      this.crmBackQueueClient.emit('ws_ms_event', {
+        type: 'ws_ms_events',
+        payload: {
+          action: 'whatsapp.confirmar_capacitacion_dispatched',
+          flowId,
+          userId,
+          confirmarCapacitacionMessageId,
+        },
+      } as CrmBackEventPayload),
+    );
+  }
+
+  private async handleSendInteractiveTrainingSlots(
+    payload: Record<string, unknown>,
+  ): Promise<void> {
+    const flowId = payload.flowId != null ? String(payload.flowId) : '';
+    const userId = payload.userId != null ? String(payload.userId) : '';
+    const phoneNumber = payload.phoneNumber != null ? String(payload.phoneNumber) : '';
+    const interactive = payload.interactive as Record<string, unknown> | undefined;
+    if (!flowId || !userId || !phoneNumber || interactive == null) {
+      return;
+    }
+    const response = await this.whatsappCloudService.sendInteractiveTrainingSlotsListMessage({
+      to: phoneNumber,
+      interactive,
+    });
+    const trainingSlotsListMessageId = extractFirstMessageId(response);
+    if (trainingSlotsListMessageId == null) {
+      return;
+    }
+    await lastValueFrom(
+      this.crmBackQueueClient.emit('ws_ms_event', {
+        type: 'ws_ms_events',
+        payload: {
+          action: 'whatsapp.training_slots_list_dispatched',
+          flowId,
+          userId,
+          trainingSlotsListMessageId,
+        },
+      } as CrmBackEventPayload),
+    );
+  }
+
+  private async handleSendWhatsappText(payload: Record<string, unknown>): Promise<void> {
+    const phoneNumber = payload.phoneNumber != null ? String(payload.phoneNumber) : '';
+    const body = payload.body != null ? String(payload.body) : '';
+    if (!phoneNumber || !body) {
+      return;
+    }
+    await this.whatsappCloudService.sendTextMessage(phoneNumber, body);
   }
 
   private async handleSentTrainingMessage(payload: Record<string, unknown>): Promise<void> {

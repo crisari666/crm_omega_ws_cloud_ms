@@ -24,6 +24,7 @@ import { WHATSAPP_ONBOARDING_WEBHOOK_CTAS } from './utils/onboarding-webhook.con
 import { matchesGreetingInterestedInput } from './utils/match-greeting-interested.util';
 import { matchesVideoInterestedInput } from './utils/match-video-interested.util';
 import { WHATSAPP_ECOSYSTEM_HEALTH_DELIVERY_ERROR_CODE } from './utils/whatsapp-ecosystem-delivery.constants';
+import { matchesTrainingAgendarInput } from './utils/match-training-agendar.util';
 
 @Controller('whatsapp-cloud')
 export class WhatsappCloudController {
@@ -94,6 +95,36 @@ export class WhatsappCloudController {
         await this.emitInboundUserMessageToCrmBack(value, messageRecord);
         const messageType = messageRecord.type;
         console.log({ messageType });
+        if (messageType === 'interactive') {
+          const interactive = messageRecord.interactive as Record<string, unknown> | undefined;
+          const interactiveType = interactive?.type;
+          if (interactiveType === 'list_reply') {
+            const listReply = interactive?.list_reply as Record<string, unknown> | undefined;
+            const listRowIdRaw = listReply?.id;
+            const listRowId = typeof listRowIdRaw === 'string' ? listRowIdRaw : '';
+            const context = messageRecord.context as Record<string, unknown> | undefined;
+            const contextMessageIdValue = context?.id;
+            const contextMessageId =
+              typeof contextMessageIdValue === 'string' ? contextMessageIdValue : '';
+            const contacts = value.contacts as Array<Record<string, unknown>> | undefined;
+            const waIdValue = contacts?.[0]?.wa_id;
+            const waId = typeof waIdValue === 'string' ? waIdValue : '';
+            if (listRowId.length > 0 && contextMessageId.length > 0 && waId.length > 0) {
+              await lastValueFrom(
+                this.crmBackQueueClient.emit('ws_ms_event', {
+                  type: 'ws_ms_events',
+                  payload: {
+                    action: 'whatsapp.training_slot_selected',
+                    fromWaId: waId,
+                    listRowId,
+                    contextMessageId,
+                  },
+                }),
+              );
+            }
+          }
+          continue;
+        }
         if (messageType === 'button' || messageType === 'text') {
           const context = messageRecord.context as Record<string, unknown> | undefined;
           const contextMessageIdValue = context?.id;
@@ -132,6 +163,18 @@ export class WhatsappCloudController {
 
           if (
             await this.handleVideoMessageReply({
+              buttonPayloadString,
+              buttonTextString,
+              textBodyString,
+              contextMessageId,
+              waId,
+            })
+          ) {
+            continue;
+          }
+
+          if (
+            await this.handleTrainingConfirmarAgendarReply({
               buttonPayloadString,
               buttonTextString,
               textBodyString,
@@ -475,6 +518,42 @@ export class WhatsappCloudController {
       this.crmBackQueueClient.emit('ws_ms_event', {
         type: 'ws_ms_events',
         payload: videoPayload,
+      }),
+    );
+    return true;
+  }
+
+  /**
+   * Post-call template (`confirmar_capacitacion`) CTA: "AGENDAR" via quick-reply button or text.
+   */
+  private async handleTrainingConfirmarAgendarReply(input: {
+    buttonPayloadString: string;
+    buttonTextString: string;
+    textBodyString: string;
+    contextMessageId: string;
+    waId: string;
+  }): Promise<boolean> {
+    const isAgendar =
+      matchesTrainingAgendarInput(input.buttonPayloadString) ||
+      matchesTrainingAgendarInput(input.buttonTextString) ||
+      matchesTrainingAgendarInput(input.textBodyString);
+    if (!isAgendar) {
+      return false;
+    }
+    if (input.contextMessageId.length === 0) {
+      return false;
+    }
+    if (input.waId.length === 0) {
+      return true;
+    }
+    await lastValueFrom(
+      this.crmBackQueueClient.emit('ws_ms_event', {
+        type: 'ws_ms_events',
+        payload: {
+          action: 'whatsapp.training_agendar_clicked',
+          fromWaId: input.waId,
+          contextMessageId: input.contextMessageId,
+        },
       }),
     );
     return true;

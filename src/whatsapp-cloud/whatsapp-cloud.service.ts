@@ -6,6 +6,10 @@ import { GraphApiError, WhatsAppClient } from '@kapso/whatsapp-cloud-api';
 import { WHATSAPP_CLIENT } from './constants/whatsapp-client.token';
 import { WhatsAppMessageTemplate } from './interfaces/message-template-type';
 import { WsChatMsgHandlerService } from './ws-chat-msg-handler.service';
+import {
+  WHATSAPP_TEMPLATE_CONFIRMAR_CAPACITACION,
+  WHATSAPP_TRAINING_SLOTS_LIST_MARKER,
+} from './utils/onboarding-webhook.constants';
 
 @Injectable()
 export class WhatsappCloudService {
@@ -299,6 +303,37 @@ export class WhatsappCloudService {
     return this.msgTemplate(templateMessage);
   }
 
+  public async sendTemplateConfirmarCapacitacionMessage(input: {
+    phoneNumber: string;
+    contactName: string;
+  }) {
+    const templateMessage: WhatsAppMessageTemplate = {
+      to: input.phoneNumber,
+      messaging_product: 'whatsapp',
+      recipient_type: 'individual',
+      type: 'template',
+      template: {
+        name: WHATSAPP_TEMPLATE_CONFIRMAR_CAPACITACION,
+        language: {
+          code: 'es',
+        },
+        components: [
+          {
+            type: 'body',
+            parameters: [
+              {
+                type: 'text',
+                text: input.contactName,
+                parameter_name: 'contact_name',
+              },
+            ],
+          },
+        ],
+      },
+    };
+    return this.msgTemplate(templateMessage);
+  }
+
   public async sendTemplateCallNotificationMessage(input: {
     phoneNumber: string;
     contactName: string;
@@ -471,6 +506,43 @@ export class WhatsappCloudService {
       });
       return data;
     } catch (error) {
+      this.mapGraphErrorToHttp(error);
+    }
+  }
+
+  /**
+   * Sends a WhatsApp interactive list message (training slot picker). Persists outbound with a stable marker.
+   */
+  public async sendInteractiveTrainingSlotsListMessage(input: {
+    to: string;
+    interactive: Record<string, unknown>;
+  }) {
+    const phoneNumberId = this.getPhoneNumberId();
+    const payload: Record<string, unknown> = {
+      messaging_product: 'whatsapp',
+      recipient_type: 'individual',
+      to: input.to,
+      type: 'interactive',
+      interactive: input.interactive,
+    };
+    try {
+      const data = await this.whatsAppClient.messages.sendRaw({
+        phoneNumberId,
+        payload,
+      });
+      this.logger.log(`📤 WhatsApp interactive list sent to ${input.to}: ${JSON.stringify(data)}`);
+      await this.wsChatMsgHandlerService.persistOutboundAfterSend({
+        toWaId: input.to,
+        phoneNumberId,
+        response: data,
+        type: 'interactive',
+        textBody: WHATSAPP_TRAINING_SLOTS_LIST_MARKER,
+      });
+      return data;
+    } catch (error) {
+      this.logger.error(
+        `Error sending WhatsApp interactive list: ${(error as Error).message}`,
+      );
       this.mapGraphErrorToHttp(error);
     }
   }
