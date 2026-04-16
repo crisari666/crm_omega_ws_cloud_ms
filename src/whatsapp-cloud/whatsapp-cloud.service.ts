@@ -525,6 +525,7 @@ export class WhatsappCloudService {
       type: 'interactive',
       interactive: input.interactive,
     };
+    console.log('payload', JSON.stringify(payload, null, 2));
     try {
       const data = await this.whatsAppClient.messages.sendRaw({
         phoneNumberId,
