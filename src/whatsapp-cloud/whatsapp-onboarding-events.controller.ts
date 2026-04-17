@@ -329,6 +329,8 @@ export class WhatsappOnboardingEventsController {
     const userId = payload.userId != null ? String(payload.userId) : '';
     const name = payload.name != null ? String(payload.name) : '';
     const phoneNumber = payload.phoneNumber != null ? String(payload.phoneNumber) : '';
+    const attendeeIdFromPayload =
+      payload.attendeeId != null ? String(payload.attendeeId).trim() : '';
     const trainingValue = payload.training as
     | undefined
     | {
@@ -337,17 +339,25 @@ export class WhatsappOnboardingEventsController {
       time?: unknown;
       trainingDateTimeIso?: unknown;
     };
-
-    const trainingDate = trainingValue?.date != null ? String(trainingValue.date) : '';
-    const trainingTime = trainingValue?.time != null ? String(trainingValue.time) : '';
-    if (!flowId || !userId || !name || !phoneNumber || !trainingDate || !trainingTime) {
+    const attendeeIdFromTraining =
+      trainingValue?.attendeeId != null ? String(trainingValue.attendeeId).trim() : '';
+    const attendeeId =
+      attendeeIdFromPayload.length > 0 ? attendeeIdFromPayload : attendeeIdFromTraining;
+    const trainingDateTimeIso =
+      trainingValue?.trainingDateTimeIso != null
+        ? String(trainingValue.trainingDateTimeIso).trim()
+        : '';
+    if (!flowId || !userId || !name || !phoneNumber || attendeeId.length === 0) {
       return;
     }
-    const response = await this.whatsappCloudService.sendTemplateNotificacionCapacitacionMessage({
-      phoneNumber,
-      contactName: name,
-      fecha: trainingDate,
-      hora: trainingTime,
+    if (trainingDateTimeIso.length === 0) {
+      return;
+    }
+    const response = await this.whatsappCloudService.sendTemplateInfoTrainingMessage({
+      code: attendeeId,
+      name,
+      date: trainingDateTimeIso,
+      to: phoneNumber,
     });
     const confirmarCapacitacionMessageId = extractFirstMessageId(response);
     if (confirmarCapacitacionMessageId == null) {
