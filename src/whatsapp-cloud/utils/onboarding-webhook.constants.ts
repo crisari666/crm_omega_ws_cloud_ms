@@ -6,6 +6,7 @@ export const WHATSAPP_ONBOARDING_WEBHOOK_CTAS = {
   wantToKnowMore: 'Quiero saber',
   videoInterested: 'Interesado',
   trainingAgendar: 'AGENDAR',
+  trainingSeeOtherSlots: 'ver otros horarios',
 } as const;
 
 /** Meta template name: post-call training confirmation (body uses `contact_name`). */

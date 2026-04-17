@@ -8,5 +8,8 @@ export function matchesTrainingAgendarInput(raw: string): boolean {
   if (normalized.length === 0) {
     return false;
   }
-  return normalized === WHATSAPP_ONBOARDING_WEBHOOK_CTAS.trainingAgendar.toLowerCase();
+  return (
+    normalized === WHATSAPP_ONBOARDING_WEBHOOK_CTAS.trainingAgendar.toLowerCase() ||
+    normalized === WHATSAPP_ONBOARDING_WEBHOOK_CTAS.trainingSeeOtherSlots.toLowerCase()
+  );
 }

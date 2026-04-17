@@ -235,6 +235,49 @@ export class WhatsappCloudService {
     return this.msgTemplate(templateMessage);
   }
 
+  public async sendTemplateNotificacionCapacitacionMessage(input: {
+    phoneNumber: string;
+    contactName: string;
+    fecha: string;
+    hora: string;
+  }): Promise<unknown> {
+    const templateMessage: WhatsAppMessageTemplate = {
+      to: input.phoneNumber,
+      messaging_product: 'whatsapp',
+      recipient_type: 'individual',
+      type: 'template',
+      template: {
+        name: 'notificacion_capacitacion',
+        language: {
+          code: 'es',
+        },
+        components: [
+          {
+            type: 'body',
+            parameters: [
+              {
+                type: 'text',
+                text: input.contactName,
+                parameter_name: 'contact_name',
+              },
+              {
+                type: 'text',
+                text: input.fecha,
+                parameter_name: 'fecha',
+              },
+              {
+                type: 'text',
+                text: input.hora,
+                parameter_name: 'hora',
+              },
+            ],
+          },
+        ],
+      },
+    };
+    return this.msgTemplate(templateMessage);
+  }
+
   public async sendTemplateGreetingMessage(phoneNumber: string, name: string) {
     const templateMessage: WhatsAppMessageTemplate = {
       to: phoneNumber,
