@@ -240,14 +240,16 @@ export class WhatsappCloudService {
     contactName: string;
     fecha: string;
     hora: string;
+    googleMeetUrl: string;
   }): Promise<unknown> {
+    const meetUrl = input.googleMeetUrl.trim().length > 0 ? input.googleMeetUrl.trim() : '-';
     const templateMessage: WhatsAppMessageTemplate = {
       to: input.phoneNumber,
       messaging_product: 'whatsapp',
       recipient_type: 'individual',
       type: 'template',
       template: {
-        name: 'notificacion_capacitacion',
+        name: 'alerta_capacitacion',
         language: {
           code: 'es',
         },
@@ -269,6 +271,11 @@ export class WhatsappCloudService {
                 type: 'text',
                 text: input.hora,
                 parameter_name: 'hora',
+              },
+              {
+                type: 'text',
+                text: meetUrl,
+                parameter_name: 'link_meet',
               },
             ],
           },

@@ -339,6 +339,7 @@ export class WhatsappOnboardingEventsController {
       date?: unknown;
       time?: unknown;
       trainingDateTimeIso?: unknown;
+      googleMeetUrl?: unknown;
     };
     const attendeeIdFromTraining =
       trainingValue?.attendeeId != null ? String(trainingValue.attendeeId).trim() : '';
@@ -352,6 +353,8 @@ export class WhatsappOnboardingEventsController {
       trainingValue?.trainingDateTimeIso != null
         ? String(trainingValue.trainingDateTimeIso).trim()
         : '';
+    const googleMeetUrl =
+      trainingValue?.googleMeetUrl != null ? String(trainingValue.googleMeetUrl).trim() : '';
     if (!flowId || !userId || !name || !phoneNumber) {
       return;
     }
@@ -390,6 +393,7 @@ export class WhatsappOnboardingEventsController {
       contactName: name,
       fecha: trainingDate,
       hora: trainingTime,
+      googleMeetUrl,
     });
     const confirmarCapacitacionMessageId = extractFirstMessageId(response);
     if (confirmarCapacitacionMessageId == null) {
