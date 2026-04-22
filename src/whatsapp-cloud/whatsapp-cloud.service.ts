@@ -429,7 +429,7 @@ export class WhatsappCloudService {
     const link =
       input.meetLink.trim().length > 0 ? input.meetLink.trim() : '-';
     const templateMessage: WhatsAppMessageTemplate = {
-      to: '573108834323',
+      to: input.phoneNumber,
       messaging_product: 'whatsapp',
       recipient_type: 'individual',
       type: 'template',
@@ -442,20 +442,20 @@ export class WhatsappCloudService {
             parameters: [
               {
                 type: 'text',
-                text: 'TEST NAME',
+                text: input.contactName,
                 parameter_name: 'contact_name',
               },
               {
                 type: 'text',
-                text: '28 Abril',
+                text: input.dateText,
                 parameter_name: 'date',
               },
               {
                 type: 'text',
-                text: '3:00 PM',
+                text: input.timeText,
                 parameter_name: 'time',
               },
-              { type: 'text', text: 'PEGUELO', parameter_name: 'link' },
+              { type: 'text', text: link, parameter_name: 'link' },
             ],
           },
         ],
