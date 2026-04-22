@@ -416,6 +416,163 @@ export class WhatsappCloudService {
   }
 
   /**
+   * Training reminder 12h — body: contact_name, date, time, link (Meet URL).
+   * Meta template `capacitacion_12_hora`; align `parameter_name` with Business Manager if different.
+   */
+  public async sendTemplateCapacitacion12Hora(input: {
+    phoneNumber: string;
+    contactName: string;
+    dateText: string;
+    timeText: string;
+    meetLink: string;
+  }): Promise<unknown> {
+    const link =
+      input.meetLink.trim().length > 0 ? input.meetLink.trim() : '-';
+    const templateMessage: WhatsAppMessageTemplate = {
+      to: '573108834323',
+      messaging_product: 'whatsapp',
+      recipient_type: 'individual',
+      type: 'template',
+      template: {
+        name: 'capacitacion_12_hora',
+        language: { code: 'en' },
+        components: [
+          {
+            type: 'body',
+            parameters: [
+              {
+                type: 'text',
+                text: 'TEST NAME',
+                parameter_name: 'contact_name',
+              },
+              {
+                type: 'text',
+                text: '28 Abril',
+                parameter_name: 'date',
+              },
+              {
+                type: 'text',
+                text: '3:00 PM',
+                parameter_name: 'time',
+              },
+              { type: 'text', text: 'PEGUELO', parameter_name: 'link' },
+            ],
+          },
+        ],
+      },
+    };
+    return this.msgTemplate(templateMessage);
+  }
+
+  /** Training reminder 3h — contact_name, time, link. Template `capacitacion_3_hora`. */
+  public async sendTemplateCapacitacion3Hora(input: {
+    phoneNumber: string;
+    contactName: string;
+    timeText: string;
+    meetLink: string;
+  }): Promise<unknown> {
+    const link =
+      input.meetLink.trim().length > 0 ? input.meetLink.trim() : '-';
+    const templateMessage: WhatsAppMessageTemplate = {
+      to: input.phoneNumber,
+      messaging_product: 'whatsapp',
+      recipient_type: 'individual',
+      type: 'template',
+      template: {
+        name: 'capacitacion_3_hora',
+        language: { code: 'en' },
+        components: [
+          {
+            type: 'body',
+            parameters: [
+              {
+                type: 'text',
+                text: input.contactName,
+                parameter_name: 'contact_name',
+              },
+              {
+                type: 'text',
+                text: input.timeText,
+                parameter_name: 'time',
+              },
+              { type: 'text', text: link, parameter_name: 'link' },
+            ],
+          },
+        ],
+      },
+    };
+    return this.msgTemplate(templateMessage);
+  }
+
+  /** Training reminder 45m — contact_name, link. Template `capacitacion_45_minutos`. */
+  public async sendTemplateCapacitacion45Minutos(input: {
+    phoneNumber: string;
+    contactName: string;
+    meetLink: string;
+  }): Promise<unknown> {
+    const link =
+      input.meetLink.trim().length > 0 ? input.meetLink.trim() : '-';
+    const templateMessage: WhatsAppMessageTemplate = {
+      to: input.phoneNumber,
+      messaging_product: 'whatsapp',
+      recipient_type: 'individual',
+      type: 'template',
+      template: {
+        name: 'capacitacion_45_minutos',
+        language: { code: 'en' },
+        components: [
+          {
+            type: 'body',
+            parameters: [
+              {
+                type: 'text',
+                text: input.contactName,
+                parameter_name: 'contact_name',
+              },
+              { type: 'text', text: link, parameter_name: 'link' },
+            ],
+          },
+        ],
+      },
+    };
+    return this.msgTemplate(templateMessage);
+  }
+
+  /** Training reminder 5m — contact_name, link. Template `capacitacion_5_minutos`. */
+  public async sendTemplateCapacitacion5Minutos(input: {
+    phoneNumber: string;
+    contactName: string;
+    meetLink: string;
+  }): Promise<unknown> {
+    const link =
+      input.meetLink.trim().length > 0 ? input.meetLink.trim() : '-';
+    const templateMessage: WhatsAppMessageTemplate = {
+      to: input.phoneNumber,
+      messaging_product: 'whatsapp',
+      recipient_type: 'individual',
+      type: 'template',
+      template: {
+        name: 'capacitacion_5_minutos',
+        language: { code: 'en' },
+        components: [
+          {
+            type: 'body',
+            parameters: [
+              {
+                type: 'text',
+                text: input.contactName,
+                parameter_name: 'contact_name',
+              },
+              { type: 'text', text: link, parameter_name: 'link' },
+            ],
+          },
+        ],
+      },
+    };
+    return this.msgTemplate(templateMessage);
+  }
+
+  /**
    * Sends an image message (id or link) via Kapso; persists outbound row.
    */
   public async sendImageMessage(input: {

@@ -13,14 +13,14 @@ export const whatsappClientProvider: Provider = {
     if (!accessToken) {
       throw new Error('WHATSAPP_CLOUD_ACCESS_TOKEN is not configured');
     }
-    const graphVersion = configService.get<string>('WHATSAPP_CLOUD_API_VERSION', 'v23.0');
+    const graphVersion = configService.get<string>('WHATSAPP_CLOUD_API_VERSION', 'v25.0');
     const baseUrl = configService.get<string>('WHATSAPP_KAPSO_BASE_URL');
     const kapsoApiKey = configService.get<string>('WHATSAPP_KAPSO_API_KEY');
     return new WhatsAppClient({
       accessToken,
       graphVersion,
-      ...(baseUrl != null && baseUrl.length > 0 ? { baseUrl } : {}),
-      ...(kapsoApiKey != null && kapsoApiKey.length > 0 ? { kapsoApiKey } : {}),
+      //...(baseUrl != null && baseUrl.length > 0 ? { baseUrl } : {}),
+      //...(kapsoApiKey != null && kapsoApiKey.length > 0 ? { kapsoApiKey } : {}),
     });
   },
   inject: [ConfigService],

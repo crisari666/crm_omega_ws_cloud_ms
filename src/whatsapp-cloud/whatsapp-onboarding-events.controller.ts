@@ -22,6 +22,14 @@ function extractFirstMessageId(response: unknown): string | null {
   return typeof idValue === 'string' && idValue.length > 0 ? idValue : null;
 }
 
+function extractMessagesSubset(response: unknown): Record<string, unknown> | undefined {
+  if (response == null || typeof response !== 'object') return undefined;
+  const data = response as Record<string, unknown>;
+  const messagesValue = data.messages;
+  if (!Array.isArray(messagesValue)) return undefined;
+  return { messages: messagesValue };
+}
+
 @Controller()
 export class WhatsappOnboardingEventsController {
   public constructor(
@@ -72,6 +80,9 @@ export class WhatsappOnboardingEventsController {
     if (actionValue === 'send.whatsapp_text') {
       await this.handleSendWhatsappText(payload);
       return { success: true };
+    }
+    if (actionValue === 'send.training_reminder') {
+      return this.handleSendTrainingReminder(payload);
     }
     return { success: false, message: 'unsupported action' };
   }
@@ -322,6 +333,113 @@ export class WhatsappOnboardingEventsController {
       return;
     }
     await this.whatsappCloudService.sendTextMessage(phoneNumber, body);
+  }
+
+  /**
+   * Outbound training slot reminders (`capacitacion_*` templates). Returns payload for monolith DB.
+   */
+  private async handleSendTrainingReminder(
+    payload: Record<string, unknown>,
+  ): Promise<{
+    success: boolean;
+    message?: string;
+    messageId?: string;
+    raw?: Record<string, unknown>;
+  }> {
+    const phoneNumber =
+      payload.phoneNumber != null
+        ? String(payload.phoneNumber).trim()
+        : payload.to != null
+          ? String(payload.to).trim()
+          : '';
+    const contactName =
+      payload.contactName != null
+        ? String(payload.contactName).trim()
+        : payload.name != null
+          ? String(payload.name).trim()
+          : '';
+    const templateName =
+      payload.templateName != null
+        ? String(payload.templateName).trim()
+        : payload.template_name != null
+          ? String(payload.template_name).trim()
+          : '';
+    const dateText =
+      payload.dateText != null ? String(payload.dateText).trim() : '';
+    const timeText =
+      payload.timeText != null ? String(payload.timeText).trim() : '';
+    const meetLink =
+      payload.meetLink != null
+        ? String(payload.meetLink).trim()
+        : payload.googleMeetUrl != null
+          ? String(payload.googleMeetUrl).trim()
+          : '';
+
+    if (!phoneNumber || !contactName || !templateName) {
+      return { success: false, message: 'missing phoneNumber, contactName, or templateName' };
+    }
+
+    const templatesNeedLink = new Set([
+      'capacitacion_12_hora',
+      'capacitacion_3_hora',
+      'capacitacion_45_minutos',
+      'capacitacion_5_minutos',
+    ]);
+    if (!templatesNeedLink.has(templateName)) {
+      return { success: false, message: 'unsupported templateName' };
+    }
+    if (meetLink.length === 0) {
+      return { success: false, message: 'missing meetLink' };
+    }
+
+    try {
+      let response: unknown;
+      if (templateName === 'capacitacion_12_hora') {
+        if (!dateText || !timeText) {
+          return { success: false, message: 'missing dateText or timeText for 12h template' };
+        }
+        response = await this.whatsappCloudService.sendTemplateCapacitacion12Hora({
+          phoneNumber,
+          contactName,
+          dateText,
+          timeText,
+          meetLink,
+        });
+      } else if (templateName === 'capacitacion_3_hora') {
+        if (!timeText) {
+          return { success: false, message: 'missing timeText for 3h template' };
+        }
+        response = await this.whatsappCloudService.sendTemplateCapacitacion3Hora({
+          phoneNumber,
+          contactName,
+          timeText,
+          meetLink,
+        });
+      } else if (templateName === 'capacitacion_45_minutos') {
+        response = await this.whatsappCloudService.sendTemplateCapacitacion45Minutos({
+          phoneNumber,
+          contactName,
+          meetLink,
+        });
+      } else {
+        response = await this.whatsappCloudService.sendTemplateCapacitacion5Minutos({
+          phoneNumber,
+          contactName,
+          meetLink,
+        });
+      }
+      const messageId = extractFirstMessageId(response);
+      const raw = extractMessagesSubset(response);
+      return {
+        success: true,
+        ...(messageId != null ? { messageId } : {}),
+        ...(raw != null ? { raw } : {}),
+      };
+    } catch (err) {
+      console.error('handleSendTrainingReminder error', JSON.stringify(err, null, 2));
+      const message = err instanceof Error ? err.message : String(err);
+      return { success: false, message };
+    }
   }
 
   private async handleSentTrainingMessage(payload: Record<string, unknown>): Promise<void> {
