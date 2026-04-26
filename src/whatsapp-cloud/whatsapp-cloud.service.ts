@@ -2,7 +2,7 @@ import { HttpException, HttpStatus, Inject, Injectable, Logger } from '@nestjs/c
 import { ConfigService } from '@nestjs/config';
 import { format } from 'date-fns';
 import { enUS, es } from 'date-fns/locale';
-import { GraphApiError, WhatsAppClient } from '@kapso/whatsapp-cloud-api';
+import { GraphApiError, type SendMessageResponse, WhatsAppClient } from '@kapso/whatsapp-cloud-api';
 import { WHATSAPP_CLIENT } from './constants/whatsapp-client.token';
 import { WhatsAppMessageTemplate } from './interfaces/message-template-type';
 import { WsChatMsgHandlerService } from './ws-chat-msg-handler.service';
@@ -49,6 +49,59 @@ export class WhatsappCloudService {
       err instanceof Error ? err.message : 'WhatsApp Cloud request failed',
       HttpStatus.INTERNAL_SERVER_ERROR,
     );
+  }
+
+  private getMetaAccessToken(): string {
+    const token = this.configService.get<string>('WHATSAPP_CLOUD_ACCESS_TOKEN');
+    if (!token) {
+      throw new Error('WHATSAPP_CLOUD_ACCESS_TOKEN is not configured');
+    }
+    return token;
+  }
+
+  private getGraphApiVersion(): string {
+    return this.configService.get<string>('WHATSAPP_CLOUD_API_VERSION', 'v25.0');
+  }
+
+  /**
+   * POST to Meta Graph `/{phone-number-id}/messages` (bypasses Kapso client).
+   */
+  private async postMetaGraphMessages(payload: Record<string, unknown>): Promise<unknown> {
+    const phoneNumberId = this.getPhoneNumberId();
+    const version = this.getGraphApiVersion();
+    const token = this.getMetaAccessToken();
+    const url = `https://graph.facebook.com/${version}/${phoneNumberId}/messages`;
+    const httpResponse = await fetch(url, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${token}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(payload),
+    });
+    const rawText = await httpResponse.text();
+    let responseBody: unknown;
+    try {
+      responseBody = rawText.length > 0 ? (JSON.parse(rawText) as unknown) : {};
+    } catch {
+      throw new HttpException(
+        `Meta Graph returned non-JSON: ${rawText.slice(0, 200)}`,
+        HttpStatus.BAD_GATEWAY,
+      );
+    }
+    if (!httpResponse.ok) {
+      const errObj = responseBody as { error?: { message?: string } };
+      const message =
+        typeof errObj.error?.message === 'string' && errObj.error.message.length > 0
+          ? errObj.error.message
+          : httpResponse.statusText;
+      const status =
+        httpResponse.status >= 400 && httpResponse.status < 600
+          ? httpResponse.status
+          : HttpStatus.BAD_GATEWAY;
+      throw new HttpException(message, status);
+    }
+    return responseBody;
   }
 
   private formatTrainingDateToSpanish(dateString: string): string {
@@ -128,6 +181,7 @@ export class WhatsappCloudService {
       });
       return data;
     } catch (error) {
+      console.error('error', JSON.stringify(error, null, 2));
       this.logger.error(`Error sending WhatsApp Cloud template: ${(error as Error).message}`);
       this.mapGraphErrorToHttp(error);
     }
@@ -160,6 +214,8 @@ export class WhatsappCloudService {
     };
     return this.msgTemplate(templateMessage);
   }
+
+
 
   public async sendHelloWorldTemplate(phoneNumber: string) {
     const templateMessage: WhatsAppMessageTemplate = {
@@ -415,20 +471,16 @@ export class WhatsappCloudService {
     return this.msgTemplate(templateMessage);
   }
 
-  /**
-   * Training reminder 12h — body: contact_name, date, time, link (Meet URL).
-   * Meta template `capacitacion_12_hora`; align `parameter_name` with Business Manager if different.
-   */
-  public async sendTemplateCapacitacion12Hora(input: {
+  private buildCapacitacion12HoraTemplateMessage(input: {
     phoneNumber: string;
     contactName: string;
     dateText: string;
     timeText: string;
     meetLink: string;
-  }): Promise<unknown> {
+  }): WhatsAppMessageTemplate {
     const link =
       input.meetLink.trim().length > 0 ? input.meetLink.trim() : '-';
-    const templateMessage: WhatsAppMessageTemplate = {
+    return {
       to: input.phoneNumber,
       messaging_product: 'whatsapp',
       recipient_type: 'individual',
@@ -455,13 +507,63 @@ export class WhatsappCloudService {
                 text: input.timeText,
                 parameter_name: 'time',
               },
-              { type: 'text', text: link, parameter_name: 'link' },
+              { type: 'text', text: link, 'parameter_name': 'link' },
             ],
           },
         ],
       },
     };
-    return this.msgTemplate(templateMessage);
+  }
+
+  /**
+   * Training reminder 12h — body: contact_name, date, time, link (Meet URL).
+   * Meta template `capacitacion_12_hora`; align `parameter_name` with Business Manager if different.
+   */
+  public async sendTemplateCapacitacion12Hora(input: {
+    phoneNumber: string;
+    contactName: string;
+    dateText: string;
+    timeText: string;
+    meetLink: string;
+  }): Promise<unknown> {
+    return this.msgTemplate(this.buildCapacitacion12HoraTemplateMessage(input));
+  }
+
+  /**
+   * Same payload as {@link sendTemplateCapacitacion12Hora} but calls Meta Graph
+   * `POST /{phone-number-id}/messages` with `WHATSAPP_CLOUD_ACCESS_TOKEN` (no Kapso sendRaw).
+   */
+  public async sendTemplateCapacitacion12HoraViaMetaGraph(input: {
+    phoneNumber: string;
+    contactName: string;
+    dateText: string;
+    timeText: string;
+    meetLink: string;
+  }): Promise<unknown> {
+    const phoneNumberId = this.getPhoneNumberId();
+    const messageTemplate = this.buildCapacitacion12HoraTemplateMessage(input);
+    try {
+      this.logger.log(`messageTemplate (Meta Graph direct) ${JSON.stringify(messageTemplate)}`);
+      const data = await this.postMetaGraphMessages(
+        messageTemplate as unknown as Record<string, unknown>,
+      );
+      this.logger.log(
+        `📤 Meta Graph template sent ${messageTemplate.template.name} to ${messageTemplate.to}: ${JSON.stringify(data)}`,
+      );
+      await this.wsChatMsgHandlerService.persistOutboundAfterSend({
+        toWaId: messageTemplate.to,
+        phoneNumberId,
+        response: data as SendMessageResponse,
+        type: 'template',
+        textBody: messageTemplate.template.name,
+      });
+      return data;
+    } catch (error) {
+      this.logger.error(
+        `Error sending Meta Graph template capacitacion_12_hora: ${(error as Error).message}`,
+      );
+      this.mapGraphErrorToHttp(error);
+    }
   }
 
   /** Training reminder 3h — contact_name, time, link. Template `capacitacion_3_hora`. */
