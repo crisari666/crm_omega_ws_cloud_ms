@@ -4,6 +4,7 @@ import { MongooseModule } from '@nestjs/mongoose';
 import { AppController } from './app.controller';
 import { AppService } from './app.service';
 import { WhatsappCloudModule } from './whatsapp-cloud/whatsapp-cloud.module';
+import { GatewayEventsModule } from './gateway-events/gateway-events.module';
 import { databaseConfig } from './config/database.config';
 import { ClientsModule, Transport } from '@nestjs/microservices';
 
@@ -43,6 +44,7 @@ import { ClientsModule, Transport } from '@nestjs/microservices';
       },
     ]),
     WhatsappCloudModule,
+    GatewayEventsModule,
   ],
   controllers: [AppController],
   providers: [AppService],
