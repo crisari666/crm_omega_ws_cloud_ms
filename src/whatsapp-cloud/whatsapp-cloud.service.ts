@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import { HttpException, HttpStatus, Inject, Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { format } from 'date-fns';
@@ -215,7 +216,51 @@ export class WhatsappCloudService {
     return this.msgTemplate(templateMessage);
   }
 
-
+  /**
+   * Meta template `potential_customer` (language `es`) for CRM potential-customer funnel.
+   * Body has no placeholders; Meta expects zero body params. A Flow CTA requires a `button`
+   * component with `sub_type: flow`, `index: 0`, and `parameters[].action.flow_token`.
+   */
+  public async sendTemplatePotentialCustomer(input: {
+    to: string;
+    contactName: string;
+    customerId: string;
+  }): Promise<unknown> {
+    const customerId: string = input.customerId.trim();
+    if (customerId.length === 0) {
+      throw new HttpException(
+        'potential_customer template requires customerId for flow_token',
+        HttpStatus.BAD_REQUEST,
+      );
+    }
+    const flowToken: string = `pc_${customerId}_${randomUUID()}`;
+    const templateMessage: WhatsAppMessageTemplate = {
+      to: input.to,
+      messaging_product: 'whatsapp',
+      recipient_type: 'individual',
+      type: 'template',
+      template: {
+        name: 'potential_customer',
+        language: { code: 'es' },
+        components: [
+          {
+            type: 'button',
+            sub_type: 'flow',
+            index: 0,
+            parameters: [
+              {
+                type: 'action',
+                action: {
+                  flow_token: flowToken,
+                },
+              },
+            ],
+          },
+        ],
+      },
+    };
+    return this.msgTemplate(templateMessage);
+  }
 
   public async sendHelloWorldTemplate(phoneNumber: string) {
     const templateMessage: WhatsAppMessageTemplate = {

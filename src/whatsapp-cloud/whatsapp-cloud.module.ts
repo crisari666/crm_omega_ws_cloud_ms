@@ -40,6 +40,24 @@ import { whatsappClientProvider } from './providers/whatsapp-client.provider';
         },
         inject: [ConfigService],
       },
+      {
+        name: 'CUSTOMERS_MS_INTEGRATION',
+        imports: [ConfigModule],
+        useFactory: (configService: ConfigService) => {
+          const rabbitMqUser = configService.get<string>('RABBIT_MQ_USER', 'guest');
+          const rabbitMqPass = configService.get<string>('RABBIT_MQ_PASS', 'guest');
+          const rabbitMqUrl = `amqp://${rabbitMqUser}:${rabbitMqPass}@localhost:5672`;
+          return {
+            transport: Transport.RMQ,
+            options: {
+              urls: [rabbitMqUrl],
+              queue: 'crm.customers.whatsapp_integration',
+              queueOptions: { durable: true },
+            },
+          };
+        },
+        inject: [ConfigService],
+      },
     ]),
     HttpModule.register({
       timeout: 10000,

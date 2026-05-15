@@ -12,3 +12,10 @@ export const COMPANY_PUBLIC_CONTACT_INFO = {
   linkedinUrl: '',
   tiktokUrl: '',
 } as const;
+
+/**
+ * Spanish notice after ventor assignment; placeholders `[user_name]` and `[user_phone]`.
+ * Keep in sync with crm-omega-customers-ms `ventor-assignment-message.constant.ts`.
+ */
+export const VENTOR_ASSIGNMENT_CUSTOMER_MESSAGE_TEMPLATE =
+  'En este momento estamos asignando tu solicitud a nuestro asesor [user_name].\n\n📲 Contacto directo: [user_phone]\n\nEn breve recibirás atención personalizada.' as const;

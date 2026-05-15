@@ -3,7 +3,7 @@ interface Language {
   policy?: 'deterministic' | 'fallback';
 }
 
-interface Parameter {
+interface TextMediaParameter {
   type: 'text' | 'image' | 'document' | 'video';
   text?: string;
   parameter_name?: string;
@@ -20,11 +20,21 @@ interface Parameter {
   };
 }
 
+interface FlowActionParameter {
+  type: 'action';
+  action: {
+    flow_token: string;
+    flow_action_data?: Record<string, unknown>;
+  };
+}
+
+type Parameter = TextMediaParameter | FlowActionParameter;
+
 interface Component {
   type: 'body' | 'header' | 'footer' | 'button';
-  sub_type?: 'url';
+  sub_type?: 'url' | 'flow' | 'quick_reply' | 'copy_code' | 'phone_number';
   parameters: Parameter[];
-  index?: number;
+  index?: number | string;
 }
 
 interface Template {
@@ -42,4 +52,12 @@ interface WhatsAppMessageTemplate {
   template: Template;
 }
 
-export type { WhatsAppMessageTemplate, Template, Component, Parameter, Language };
+export type {
+  WhatsAppMessageTemplate,
+  Template,
+  Component,
+  Parameter,
+  TextMediaParameter,
+  FlowActionParameter,
+  Language,
+};
