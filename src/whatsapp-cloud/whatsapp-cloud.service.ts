@@ -15,6 +15,11 @@ import {
   WHATSAPP_TRAINING_SLOTS_LIST_MARKER,
 } from './utils/onboarding-webhook.constants';
 
+type MetaGraphMessagesCredentials = {
+  readonly phoneNumberId: string;
+  readonly accessToken: string;
+};
+
 @Injectable()
 export class WhatsappCloudService {
   private readonly logger = new Logger(WhatsappCloudService.name);
@@ -38,6 +43,22 @@ export class WhatsappCloudService {
    */
   public getConfiguredPhoneNumberId(): string {
     return this.getPhoneNumberId();
+  }
+
+  private getCustomersPhoneNumberId(): string {
+    const id = this.configService.get<string>('WHATSAPP_CLOUD_CUSTOMERS_PHONE_NUMBER_ID');
+    if (!id || id.trim().length === 0) {
+      throw new Error('WHATSAPP_CLOUD_CUSTOMERS_PHONE_NUMBER_ID is not configured');
+    }
+    return id.trim();
+  }
+
+  private getCustomersAccessToken(): string {
+    const token = this.configService.get<string>('WHATSAPP_CLOUD_CUSTOMERS_ACCESS_TOKEN');
+    if (!token || token.trim().length === 0) {
+      throw new Error('WHATSAPP_CLOUD_CUSTOMERS_ACCESS_TOKEN is not configured');
+    }
+    return token.trim();
   }
 
   private mapGraphErrorToHttp(err: unknown): never {
@@ -70,15 +91,16 @@ export class WhatsappCloudService {
   /**
    * POST to Meta Graph `/{phone-number-id}/messages` (bypasses Kapso client).
    */
-  private async postMetaGraphMessages(payload: Record<string, unknown>): Promise<unknown> {
-    const phoneNumberId = this.getPhoneNumberId();
+  private async postMetaGraphMessages(
+    payload: Record<string, unknown>,
+    credentials: MetaGraphMessagesCredentials,
+  ): Promise<unknown> {
     const version = this.getGraphApiVersion();
-    const token = this.getMetaAccessToken();
-    const url = `https://graph.facebook.com/${version}/${phoneNumberId}/messages`;
+    const url = `https://graph.facebook.com/${version}/${credentials.phoneNumberId}/messages`;
     const httpResponse = await fetch(url, {
       method: 'POST',
       headers: {
-        Authorization: `Bearer ${token}`,
+        Authorization: `Bearer ${credentials.accessToken}`,
         'Content-Type': 'application/json',
       },
       body: JSON.stringify(payload),
@@ -167,6 +189,7 @@ export class WhatsappCloudService {
    */
   /**
    * Generic marketing / bulk campaign template send (optional static components).
+   * Uses `WHATSAPP_CLOUD_CUSTOMERS_*` credentials (CRM customers line).
    */
   public async sendMarketingTemplateMessage(input: {
     readonly to: string;
@@ -187,7 +210,34 @@ export class WhatsappCloudService {
         ...(components != null ? { components } : {}),
       },
     };
-    return this.msgTemplate(templateMessage);
+    const phoneNumberId = this.getCustomersPhoneNumberId();
+    try {
+      this.logger.log(`messageTemplate (customers) ${JSON.stringify(templateMessage)}`);
+      const data = await this.postMetaGraphMessages(
+        templateMessage as unknown as Record<string, unknown>,
+        {
+          phoneNumberId,
+          accessToken: this.getCustomersAccessToken(),
+        },
+      );
+      this.logger.log(
+        `📤 WhatsApp Cloud template (customers) sent ${templateMessage.template.name} to ${templateMessage.to}: ${JSON.stringify(data)}`,
+      );
+      await this.wsChatMsgHandlerService.persistOutboundAfterSend({
+        toWaId: templateMessage.to,
+        phoneNumberId,
+        response: data as SendMessageResponse,
+        type: 'template',
+        textBody: templateMessage.template.name,
+      });
+      return data;
+    } catch (error) {
+      console.error('error', JSON.stringify(error, null, 2));
+      this.logger.error(
+        `Error sending WhatsApp Cloud template (customers): ${(error as Error).message}`,
+      );
+      this.mapGraphErrorToHttp(error);
+    }
   }
 
   public async msgTemplate(messageTemplate: WhatsAppMessageTemplate) {
@@ -619,6 +669,10 @@ export class WhatsappCloudService {
       this.logger.log(`messageTemplate (Meta Graph direct) ${JSON.stringify(messageTemplate)}`);
       const data = await this.postMetaGraphMessages(
         messageTemplate as unknown as Record<string, unknown>,
+        {
+          phoneNumberId,
+          accessToken: this.getMetaAccessToken(),
+        },
       );
       this.logger.log(
         `📤 Meta Graph template sent ${messageTemplate.template.name} to ${messageTemplate.to}: ${JSON.stringify(data)}`,
