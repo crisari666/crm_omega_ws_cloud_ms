@@ -5,7 +5,10 @@ import { format } from 'date-fns';
 import { enUS, es } from 'date-fns/locale';
 import { GraphApiError, type SendMessageResponse, WhatsAppClient } from '@kapso/whatsapp-cloud-api';
 import { WHATSAPP_CLIENT } from './constants/whatsapp-client.token';
-import { WhatsAppMessageTemplate } from './interfaces/message-template-type';
+import {
+  WhatsAppMessageTemplate,
+  type Component,
+} from './interfaces/message-template-type';
 import { WsChatMsgHandlerService } from './ws-chat-msg-handler.service';
 import {
   WHATSAPP_TEMPLATE_CONFIRMAR_CAPACITACION,
@@ -162,6 +165,31 @@ export class WhatsappCloudService {
   /**
    * Send a template message using Kapso sendRaw (preserves existing Meta JSON shape).
    */
+  /**
+   * Generic marketing / bulk campaign template send (optional static components).
+   */
+  public async sendMarketingTemplateMessage(input: {
+    readonly to: string;
+    readonly templateName: string;
+    readonly languageCode: string;
+    readonly components?: Component[];
+  }): Promise<unknown> {
+    const components =
+      input.components != null && input.components.length > 0 ? input.components : undefined;
+    const templateMessage: WhatsAppMessageTemplate = {
+      to: input.to,
+      messaging_product: 'whatsapp',
+      recipient_type: 'individual',
+      type: 'template',
+      template: {
+        name: input.templateName,
+        language: { code: input.languageCode },
+        ...(components != null ? { components } : {}),
+      },
+    };
+    return this.msgTemplate(templateMessage);
+  }
+
   public async msgTemplate(messageTemplate: WhatsAppMessageTemplate) {
     const phoneNumberId = this.getPhoneNumberId();
     try {
