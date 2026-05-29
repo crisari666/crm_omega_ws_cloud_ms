@@ -8,10 +8,12 @@ interface TextMediaParameter {
   text?: string;
   parameter_name?: string;
   image?: {
-    link: string;
+    id?: string;
+    link?: string;
   };
   document?: {
-    link: string;
+    id?: string;
+    link?: string;
   };
   video?: {
     id?: string;
