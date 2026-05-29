@@ -35,6 +35,8 @@ export class WhatsappCloudController {
     private readonly deepSeekService: DeepSeekService,
     private readonly wsChatMsgHandlerService: WsChatMsgHandlerService,
     @Inject('CRM_BACK_QUEUE') private readonly crmBackQueueClient: ClientProxy,
+    @Inject('CUSTOMERS_MS_INTEGRATION')
+    private readonly customersMsIntegrationClient: ClientProxy,
   ) {}
 
   /**
@@ -61,6 +63,10 @@ export class WhatsappCloudController {
     return query['hub.challenge']
   }
 
+  /**
+   * Meta WABA webhooks are ingested via omega_gateway → crm-omega-customers-ms, not this route.
+   * This handler remains for local/dev; marketing reply/status RMQ emits are legacy.
+   */
   @Post('webhook')
   @HttpCode(HttpStatus.OK)
   async webhookPost(@Body() dto: unknown): Promise<HttpStatus> {
@@ -130,6 +136,29 @@ export class WhatsappCloudController {
           const contextMessageIdValue = context?.id;
           const contextMessageId =
             typeof contextMessageIdValue === 'string' ? contextMessageIdValue : '';
+
+          if (contextMessageId.length > 0) {
+            const contactsEarly = value.contacts as Array<Record<string, unknown>> | undefined;
+            const waIdEarlyValue = contactsEarly?.[0]?.wa_id;
+            const waIdEarly = typeof waIdEarlyValue === 'string' ? waIdEarlyValue : '';
+            const buttonEarly = messageRecord.button as Record<string, unknown> | undefined;
+            const textEarly = messageRecord.text as Record<string, unknown> | undefined;
+            const tsValue = messageRecord.timestamp;
+            const tsNum =
+              typeof tsValue === 'string' ? Number.parseInt(tsValue, 10) : Math.floor(Date.now() / 1000);
+            await this.emitMarketingCampaignReply({
+              contextMessageId,
+              waId: waIdEarly,
+              messageType: messageType === 'button' ? 'button' : 'text',
+              buttonPayload:
+                typeof buttonEarly?.payload === 'string' ? buttonEarly.payload : undefined,
+              textBody: typeof textEarly?.body === 'string' ? textEarly.body : undefined,
+              rawMessageId:
+                typeof messageRecord.id === 'string' ? messageRecord.id : '',
+              timestamp: Number.isFinite(tsNum) ? tsNum : Math.floor(Date.now() / 1000),
+              phoneNumberId: phoneNumberIdForChat,
+            });
+          }
 
           const button = messageRecord.button as Record<string, unknown> | undefined;
           const buttonPayload = button?.payload;
@@ -249,10 +278,39 @@ export class WhatsappCloudController {
           continue;
         }
         const statusValue = status.status;
-        if (statusValue !== 'delivered') continue;
         const messageIdValue = status.id;
         const messageId = typeof messageIdValue === 'string' ? messageIdValue : '';
         if (!messageId) continue;
+        const normalizedStatus =
+          typeof statusValue === 'string' ? statusValue.trim().toLowerCase() : '';
+        if (
+          normalizedStatus === 'sent' ||
+          normalizedStatus === 'delivered' ||
+          normalizedStatus === 'read' ||
+          normalizedStatus === 'failed'
+        ) {
+          const tsValue = status.timestamp;
+          const timestamp =
+            typeof tsValue === 'string' || typeof tsValue === 'number'
+              ? String(tsValue)
+              : undefined;
+          const errors = status.errors as Array<Record<string, unknown>> | undefined;
+          const firstError = Array.isArray(errors) ? errors[0] : undefined;
+          await this.emitMarketingMessageStatus({
+            whatsappMessageId: messageId,
+            status: normalizedStatus,
+            timestamp,
+            errorCode:
+              firstError != null && typeof firstError.code === 'number'
+                ? String(firstError.code)
+                : undefined,
+            errorMessage:
+              firstError != null && typeof firstError.title === 'string'
+                ? firstError.title
+                : undefined,
+          });
+        }
+        if (statusValue !== 'delivered') continue;
         await lastValueFrom(
           this.crmBackQueueClient.emit('ws_ms_event', {
             type: 'ws_ms_events',
@@ -557,6 +615,49 @@ export class WhatsappCloudController {
       }),
     );
     return true;
+  }
+
+  private async emitMarketingMessageStatus(input: {
+    whatsappMessageId: string;
+    status: string;
+    timestamp?: string;
+    errorCode?: string;
+    errorMessage?: string;
+  }): Promise<void> {
+    try {
+      await lastValueFrom(
+        this.customersMsIntegrationClient.emit(
+          'customers.whatsapp.marketing.message.status.v1',
+          input,
+        ),
+      );
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : String(err);
+      this.logger.warn(`emit marketing message status failed: ${message}`);
+    }
+  }
+
+  private async emitMarketingCampaignReply(input: {
+    contextMessageId: string;
+    waId: string;
+    messageType: 'button' | 'text';
+    buttonPayload?: string;
+    textBody?: string;
+    rawMessageId: string;
+    timestamp: number;
+    phoneNumberId: string;
+  }): Promise<void> {
+    if (input.contextMessageId.length === 0) {
+      return;
+    }
+    try {
+      await lastValueFrom(
+        this.customersMsIntegrationClient.emit('customers.whatsapp.marketing.reply.v1', input),
+      );
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : String(err);
+      this.logger.warn(`emit marketing campaign reply failed: ${message}`);
+    }
   }
 
   @Post('messages/template/info-capacitacion')
