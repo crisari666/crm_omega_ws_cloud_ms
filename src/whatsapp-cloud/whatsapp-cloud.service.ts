@@ -220,13 +220,14 @@ export class WhatsappCloudService {
     messageTemplate: WhatsAppMessageTemplate,
   ): Promise<unknown> {
     const phoneNumberId = this.getCustomersPhoneNumberId();
+    const accessToken = this.getCustomersAccessToken();
     try {
-      this.logger.log(`messageTemplate (customers) ${JSON.stringify(messageTemplate)}`);
+      this.logger.log(`messageTemplate (customers) ${JSON.stringify(messageTemplate)}, phoneNumberId=${phoneNumberId}, accessToken=${accessToken}`);
       const data = await this.postMetaGraphMessages(
         messageTemplate as unknown as Record<string, unknown>,
         {
           phoneNumberId,
-          accessToken: this.getCustomersAccessToken(),
+          accessToken,
         },
       );
       this.logger.log(
