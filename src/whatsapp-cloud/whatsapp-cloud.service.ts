@@ -185,6 +185,59 @@ export class WhatsappCloudService {
   }
 
   /**
+   * Text message on the CRM customers line (`WHATSAPP_CLOUD_CUSTOMERS_*`).
+   * Used by crm-omega-customers-ms via `potential_customers.ms_ws`.
+   */
+  public async sendCustomersTextMessage(to: string, body: string): Promise<{
+    success: true;
+    to: string;
+    body: string;
+    raw: unknown;
+  }> {
+    const trimmedTo = to.trim();
+    const trimmedBody = body.trim();
+    if (trimmedTo.length === 0 || trimmedBody.length === 0) {
+      throw new HttpException('missing to or body', HttpStatus.BAD_REQUEST);
+    }
+    const phoneNumberId = this.getCustomersPhoneNumberId();
+    const payload: Record<string, unknown> = {
+      messaging_product: 'whatsapp',
+      recipient_type: 'individual',
+      to: trimmedTo,
+      type: 'text',
+      text: { body: trimmedBody },
+    };
+    try {
+      this.logger.log(`sendCustomersTextMessage to=${trimmedTo} phoneNumberId=${phoneNumberId}`);
+      const data = await this.postMetaGraphMessages(payload, {
+        phoneNumberId,
+        accessToken: this.getCustomersAccessToken(),
+      });
+      this.logger.log(
+        `📤 WhatsApp Cloud text (customers) sent to ${trimmedTo}: ${JSON.stringify(data)}`,
+      );
+      await this.wsChatMsgHandlerService.persistOutboundAfterSend({
+        toWaId: trimmedTo,
+        phoneNumberId,
+        response: data as SendMessageResponse,
+        type: 'text',
+        textBody: trimmedBody,
+      });
+      return {
+        success: true,
+        to: trimmedTo,
+        body: trimmedBody,
+        raw: data,
+      };
+    } catch (error) {
+      this.logger.error(
+        `Error sending WhatsApp Cloud text (customers): ${(error as Error).message}`,
+      );
+      this.mapGraphErrorToHttp(error);
+    }
+  }
+
+  /**
    * Send a template message using Kapso sendRaw (preserves existing Meta JSON shape).
    */
   /**
@@ -220,14 +273,15 @@ export class WhatsappCloudService {
     messageTemplate: WhatsAppMessageTemplate,
   ): Promise<unknown> {
     const phoneNumberId = this.getCustomersPhoneNumberId();
-    const accessToken = this.getCustomersAccessToken();
     try {
-      this.logger.log(`messageTemplate (customers) ${JSON.stringify(messageTemplate)}, phoneNumberId=${phoneNumberId}, accessToken=${accessToken}`);
+      this.logger.log(
+        `messageTemplate (customers) ${JSON.stringify(messageTemplate)} phoneNumberId=${phoneNumberId}`,
+      );
       const data = await this.postMetaGraphMessages(
         messageTemplate as unknown as Record<string, unknown>,
         {
           phoneNumberId,
-          accessToken,
+          accessToken: this.getCustomersAccessToken(),
         },
       );
       this.logger.log(

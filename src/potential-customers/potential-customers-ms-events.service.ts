@@ -49,7 +49,7 @@ export class PotentialCustomersMsEventsService {
       if (waId.trim() === '' || body.trim() === '') {
         return { success: false, message: 'missing waId or body' };
       }
-      await this.whatsappCloudService.sendTextMessage(waId.trim(), body);
+      await this.whatsappCloudService.sendCustomersTextMessage(waId.trim(), body);
       return { success: true };
     }
     this.logger.warn(`potential_customers.ms_ws unsupported action=${action}`);
