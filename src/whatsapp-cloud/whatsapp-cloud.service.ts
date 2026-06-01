@@ -210,25 +210,34 @@ export class WhatsappCloudService {
         ...(components != null ? { components } : {}),
       },
     };
+    return this.msgTemplateForCustomers(templateMessage);
+  }
+
+  /**
+   * Template send on the CRM customers line (`WHATSAPP_CLOUD_CUSTOMERS_*`).
+   */
+  private async msgTemplateForCustomers(
+    messageTemplate: WhatsAppMessageTemplate,
+  ): Promise<unknown> {
     const phoneNumberId = this.getCustomersPhoneNumberId();
     try {
-      this.logger.log(`messageTemplate (customers) ${JSON.stringify(templateMessage)}`);
+      this.logger.log(`messageTemplate (customers) ${JSON.stringify(messageTemplate)}`);
       const data = await this.postMetaGraphMessages(
-        templateMessage as unknown as Record<string, unknown>,
+        messageTemplate as unknown as Record<string, unknown>,
         {
           phoneNumberId,
           accessToken: this.getCustomersAccessToken(),
         },
       );
       this.logger.log(
-        `📤 WhatsApp Cloud template (customers) sent ${templateMessage.template.name} to ${templateMessage.to}: ${JSON.stringify(data)}`,
+        `📤 WhatsApp Cloud template (customers) sent ${messageTemplate.template.name} to ${messageTemplate.to}: ${JSON.stringify(data)}`,
       );
       await this.wsChatMsgHandlerService.persistOutboundAfterSend({
-        toWaId: templateMessage.to,
+        toWaId: messageTemplate.to,
         phoneNumberId,
         response: data as SendMessageResponse,
         type: 'template',
-        textBody: templateMessage.template.name,
+        textBody: messageTemplate.template.name,
       });
       return data;
     } catch (error) {
@@ -298,6 +307,7 @@ export class WhatsappCloudService {
    * Meta template `potential_customer` (language `es`) for CRM potential-customer funnel.
    * Body has no placeholders; Meta expects zero body params. A Flow CTA requires a `button`
    * component with `sub_type: flow`, `index: 0`, and `parameters[].action.flow_token`.
+   * Uses `WHATSAPP_CLOUD_CUSTOMERS_*` credentials.
    */
   public async sendTemplatePotentialCustomer(input: {
     to: string;
@@ -337,7 +347,7 @@ export class WhatsappCloudService {
         ],
       },
     };
-    return this.msgTemplate(templateMessage);
+    return this.msgTemplateForCustomers(templateMessage);
   }
 
   public async sendHelloWorldTemplate(phoneNumber: string) {
