@@ -67,8 +67,12 @@ export class PotentialCustomersMsEventsService {
       const lastName: string = typeof contact.lastName === 'string' ? contact.lastName : '';
       const phone: string = typeof contact.phone === 'string' ? contact.phone : '';
       const contactWaId: string = typeof contact.waId === 'string' ? contact.waId : '';
+      const introBody: string = typeof payload.body === 'string' ? payload.body.trim() : '';
       if (waId.trim() === '' || phone.trim() === '') {
         return { success: false, message: 'missing waId or contact.phone' };
+      }
+      if (introBody.length > 0) {
+        await this.whatsappCloudService.sendCustomersTextMessage(waId.trim(), introBody);
       }
       await this.whatsappCloudService.sendCustomersContactsMessage({
         to: waId.trim(),
