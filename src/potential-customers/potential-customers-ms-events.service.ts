@@ -1,6 +1,13 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { WhatsappCloudService } from '../whatsapp-cloud/whatsapp-cloud.service';
 
+type PotentialCustomersContactPayload = {
+  readonly firstName?: unknown;
+  readonly lastName?: unknown;
+  readonly phone?: unknown;
+  readonly waId?: unknown;
+};
+
 type PotentialCustomersPayload = {
   readonly action?: unknown;
   readonly waId?: unknown;
@@ -8,6 +15,7 @@ type PotentialCustomersPayload = {
   readonly contactName?: unknown;
   readonly customerId?: unknown;
   readonly body?: unknown;
+  readonly contact?: PotentialCustomersContactPayload;
 };
 
 /**
@@ -50,6 +58,25 @@ export class PotentialCustomersMsEventsService {
         return { success: false, message: 'missing waId or body' };
       }
       await this.whatsappCloudService.sendCustomersTextMessage(waId.trim(), body);
+      return { success: true };
+    }
+    if (action === 'send.potential_customer_contacts') {
+      const waId: string = typeof payload.waId === 'string' ? payload.waId : '';
+      const contact = payload.contact ?? {};
+      const firstName: string = typeof contact.firstName === 'string' ? contact.firstName : '';
+      const lastName: string = typeof contact.lastName === 'string' ? contact.lastName : '';
+      const phone: string = typeof contact.phone === 'string' ? contact.phone : '';
+      const contactWaId: string = typeof contact.waId === 'string' ? contact.waId : '';
+      if (waId.trim() === '' || phone.trim() === '') {
+        return { success: false, message: 'missing waId or contact.phone' };
+      }
+      await this.whatsappCloudService.sendCustomersContactsMessage({
+        to: waId.trim(),
+        firstName: firstName.trim(),
+        lastName: lastName.trim(),
+        phone: phone.trim(),
+        waId: contactWaId.trim().length > 0 ? contactWaId.trim() : undefined,
+      });
       return { success: true };
     }
     this.logger.warn(`potential_customers.ms_ws unsupported action=${action}`);
