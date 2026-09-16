@@ -384,7 +384,7 @@ export class WhatsappCloudService {
       type: 'template',
       template: {
         name: 'potential_customer',
-        language: { code: 'es' },
+        language: { code: 'en' },
         components: [
           {
             type: 'button',
