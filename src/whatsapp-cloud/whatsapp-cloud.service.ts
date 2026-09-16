@@ -14,6 +14,11 @@ import {
   WHATSAPP_TEMPLATE_CONFIRMAR_CAPACITACION,
   WHATSAPP_TRAINING_SLOTS_LIST_MARKER,
 } from './utils/onboarding-webhook.constants';
+import {
+  buildWhatsappContactsMessagePayload,
+  buildWhatsappContactsMessageSummary,
+  type BuildWhatsappContactsMessageInput,
+} from './utils/build-whatsapp-contacts-message.util';
 
 type MetaGraphMessagesCredentials = {
   readonly phoneNumberId: string;
@@ -232,6 +237,68 @@ export class WhatsappCloudService {
     } catch (error) {
       this.logger.error(
         `Error sending WhatsApp Cloud text (customers): ${(error as Error).message}`,
+      );
+      this.mapGraphErrorToHttp(error);
+    }
+  }
+
+  /**
+   * Contacts (vCard) message on the CRM customers line (`WHATSAPP_CLOUD_CUSTOMERS_*`).
+   * Used by crm-omega-customers-ms via `potential_customers.ms_ws` for ventor assignment.
+   */
+  public async sendCustomersContactsMessage(
+    input: BuildWhatsappContactsMessageInput,
+  ): Promise<{
+    success: true;
+    to: string;
+    summary: string;
+    raw: unknown;
+  }> {
+    const trimmedTo = input.to.trim();
+    const trimmedPhone = input.phone.trim();
+    if (trimmedTo.length === 0 || trimmedPhone.length === 0) {
+      throw new HttpException('missing to or phone', HttpStatus.BAD_REQUEST);
+    }
+    const phoneNumberId = this.getCustomersPhoneNumberId();
+    const contactInput: BuildWhatsappContactsMessageInput = {
+      to: trimmedTo,
+      firstName: input.firstName,
+      lastName: input.lastName,
+      phone: trimmedPhone,
+      waId: input.waId,
+    };
+    const payload = buildWhatsappContactsMessagePayload(contactInput);
+    const summary = buildWhatsappContactsMessageSummary(contactInput);
+    try {
+      this.logger.log(
+        `sendCustomersContactsMessage to=${trimmedTo} phoneNumberId=${phoneNumberId}`,
+      );
+      const data = await this.postMetaGraphMessages(
+        payload as unknown as Record<string, unknown>,
+        {
+          phoneNumberId,
+          accessToken: this.getCustomersAccessToken(),
+        },
+      );
+      this.logger.log(
+        `📤 WhatsApp Cloud contacts (customers) sent to ${trimmedTo}: ${JSON.stringify(data)}`,
+      );
+      await this.wsChatMsgHandlerService.persistOutboundAfterSend({
+        toWaId: trimmedTo,
+        phoneNumberId,
+        response: data as SendMessageResponse,
+        type: 'contacts',
+        textBody: summary,
+      });
+      return {
+        success: true,
+        to: trimmedTo,
+        summary,
+        raw: data,
+      };
+    } catch (error) {
+      this.logger.error(
+        `Error sending WhatsApp Cloud contacts (customers): ${(error as Error).message}`,
       );
       this.mapGraphErrorToHttp(error);
     }
