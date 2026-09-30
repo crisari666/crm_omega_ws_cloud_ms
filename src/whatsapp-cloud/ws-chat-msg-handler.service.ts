@@ -13,6 +13,7 @@ import {
 import type { PaginatedResult } from './types/paginated-result.type';
 import type { LotesChatDuplicateInboundSuppression } from './interfaces/lotes-chat-duplicate-inbound-suppression.interface';
 import type { WhatsappLlmConversationTurn } from './interfaces/whatsapp-llm-conversation-turn.interface';
+import type { InboundStoredMedia } from './interfaces/inbound-stored-media.interface';
 import { normalizeInboundTextForDuplicateCompare } from './utils/normalize-inbound-text-for-duplicate-compare.util';
 import { WhatsappLocalMediaStorageService } from './whatsapp-local-media-storage.service';
 import { normalizeWaId } from './utils/normalize-wa-id.util';
@@ -417,6 +418,39 @@ export class WsChatMsgHandlerService {
         ? msg.media.mimeType
         : 'application/octet-stream';
     return { absolutePath, mimeType };
+  }
+
+  /**
+   * Finds an inbound message with downloaded media by its WhatsApp message id (wamid).
+   */
+  public async findInboundMediaByWhatsappMessageId(
+    whatsappMessageId: string,
+  ): Promise<InboundStoredMedia | null> {
+    const trimmedId = whatsappMessageId.trim();
+    if (trimmedId.length === 0) {
+      return null;
+    }
+    const msg = await this.messageModel
+      .findOne({
+        whatsappMessageId: trimmedId,
+        'media.storedRelativePath': { $exists: true, $ne: '' },
+      })
+      .exec();
+    const relative = msg?.media?.storedRelativePath;
+    if (msg == null || relative == null || relative.length === 0) {
+      return null;
+    }
+    const absolutePath = this.localMediaStorage.resolveSafeAbsolutePath(relative);
+    if (absolutePath == null) {
+      return null;
+    }
+    return {
+      whatsappMessageId: trimmedId,
+      storedRelativePath: relative,
+      absolutePath,
+      mimeType: msg.media.mimeType ?? 'application/octet-stream',
+      filename: msg.media.filename ?? '',
+    };
   }
 
   private resolveMessageTextForLlm(doc: WhatsappMessageDocument): string {
