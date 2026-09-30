@@ -1,8 +1,9 @@
-import { Controller, Inject } from '@nestjs/common';
+import { Controller, Inject, Logger } from '@nestjs/common';
 import { EventPattern, MessagePattern, Payload } from '@nestjs/microservices';
 import { ClientProxy } from '@nestjs/microservices';
 import { lastValueFrom } from 'rxjs';
 import { WhatsappCloudService } from './whatsapp-cloud.service';
+import { RecruitingWhatsappCaptureService } from './recruiting-whatsapp-capture.service';
 
 type CrmBackEventSourceType = 'ws_ms_events' | 'voice_agent_ms_events';
 
@@ -32,8 +33,11 @@ function extractMessagesSubset(response: unknown): Record<string, unknown> | und
 
 @Controller()
 export class WhatsappOnboardingEventsController {
+  private readonly logger = new Logger(WhatsappOnboardingEventsController.name);
+
   public constructor(
     private readonly whatsappCloudService: WhatsappCloudService,
+    private readonly recruitingWhatsappCaptureService: RecruitingWhatsappCaptureService,
     @Inject('CRM_BACK_QUEUE') private readonly crmBackQueueClient: ClientProxy,
   ) {}
 
@@ -83,6 +87,14 @@ export class WhatsappOnboardingEventsController {
     }
     if (actionValue === 'send.training_reminder') {
       return this.handleSendTrainingReminder(payload);
+    }
+    if (actionValue === 'send.recruiting_capture_start') {
+      await this.handleRecruitingCaptureStart(payload);
+      return { success: true };
+    }
+    if (actionValue === 'send.recruiting_meet_link') {
+      await this.handleRecruitingMeetLink(payload);
+      return { success: true };
     }
     return { success: false, message: 'unsupported action' };
   }
@@ -528,6 +540,131 @@ export class WhatsappOnboardingEventsController {
         },
       } as CrmBackEventPayload),
     );
+  }
+
+  private async handleRecruitingCaptureStart(
+    payload: Record<string, unknown>,
+  ): Promise<void> {
+    const campaignId =
+      payload.campaignId != null ? String(payload.campaignId).trim() : '';
+    const candidateId =
+      payload.candidateId != null ? String(payload.candidateId).trim() : '';
+    const to =
+      payload.to != null
+        ? String(payload.to).trim()
+        : payload.phoneNumber != null
+          ? String(payload.phoneNumber).trim()
+          : '';
+    const whatsappAgentPrompt =
+      payload.whatsappAgentPrompt != null
+        ? String(payload.whatsappAgentPrompt)
+        : '';
+    const contactName =
+      payload.contactName != null ? String(payload.contactName).trim() : '';
+    const rawFields = payload.captureFields;
+    const captureFields: Array<{
+      key: string;
+      label: string;
+      required: boolean;
+      order: number;
+    }> = [];
+    if (Array.isArray(rawFields)) {
+      for (const row of rawFields) {
+        if (row == null || typeof row !== 'object') continue;
+        const record = row as Record<string, unknown>;
+        const key = typeof record.key === 'string' ? record.key.trim() : '';
+        const label =
+          typeof record.label === 'string' ? record.label.trim() : key;
+        if (key.length === 0) continue;
+        captureFields.push({
+          key,
+          label,
+          required: record.required !== false,
+          order: typeof record.order === 'number' ? record.order : 0,
+        });
+      }
+    }
+    if (
+      campaignId.length === 0 ||
+      candidateId.length === 0 ||
+      to.length === 0 ||
+      whatsappAgentPrompt.trim().length === 0
+    ) {
+      return;
+    }
+    const templateNameRaw =
+      payload.whatsappTemplateName != null
+        ? String(payload.whatsappTemplateName).trim()
+        : '';
+    const templateLanguageRaw =
+      payload.whatsappTemplateLanguage != null
+        ? String(payload.whatsappTemplateLanguage).trim()
+        : '';
+    const templateName =
+      templateNameRaw.length > 0
+        ? templateNameRaw
+        : 'candidate_opening_message';
+    const templateLanguage =
+      templateLanguageRaw.length > 0 ? templateLanguageRaw : 'spa';
+    if (contactName.length === 0) {
+      this.logger.error(
+        `Recruiting opening template skipped: missing contactName for ${to}`,
+      );
+      return;
+    }
+    try {
+      await this.whatsappCloudService.sendRecruitingOpeningTemplate({
+        phoneNumber: to,
+        templateName,
+        languageCode: templateLanguage,
+        contactName,
+      });
+    } catch (error) {
+      this.logger.error(
+        `Recruiting opening template failed (${templateName}/${templateLanguage}) to ${to}`,
+        error instanceof Error ? error.stack : String(error),
+      );
+      return;
+    }
+    await this.recruitingWhatsappCaptureService.startCapture({
+      campaignId,
+      candidateId,
+      to,
+      whatsappAgentPrompt,
+      captureFields,
+      contactName: contactName.length > 0 ? contactName : undefined,
+      skipTextOpener: true,
+      openingTemplateLabel: `${templateName} (${templateLanguage})`,
+      cvRequestMessage: this.readOptionalString(payload.cvRequestMessage),
+      videoRequestMessage: this.readOptionalString(payload.videoRequestMessage),
+      videoReceivedMessage: this.readOptionalString(payload.videoReceivedMessage),
+    });
+  }
+
+  private readOptionalString(value: unknown): string | undefined {
+    return typeof value === 'string' && value.trim().length > 0 ? value.trim() : undefined;
+  }
+
+  private async handleRecruitingMeetLink(
+    payload: Record<string, unknown>,
+  ): Promise<void> {
+    const candidateId =
+      payload.candidateId != null ? String(payload.candidateId).trim() : '';
+    const to =
+      payload.to != null
+        ? String(payload.to).trim()
+        : payload.phoneNumber != null
+          ? String(payload.phoneNumber).trim()
+          : '';
+    const text = payload.text != null ? String(payload.text) : '';
+    if (candidateId.length === 0 || to.length === 0 || text.trim().length === 0) {
+      return;
+    }
+    await this.recruitingWhatsappCaptureService.sendMeetLink({
+      candidateId,
+      to,
+      text,
+    });
   }
 }
 

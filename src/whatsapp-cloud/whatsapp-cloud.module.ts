@@ -8,6 +8,8 @@ import { WhatsappCloudController } from './whatsapp-cloud.controller';
 import { WhatsappOnboardingEventsController } from './whatsapp-onboarding-events.controller';
 import { WhatsappChatController } from './whatsapp-chat.controller';
 import { DeepSeekService } from './deep-seek.service';
+import { RecruitingWhatsappCaptureService } from './recruiting-whatsapp-capture.service';
+import { CvTextExtractorService } from './cv-text-extractor.service';
 import { WhatsappChat, WhatsappChatSchema } from './schemas/whatsapp-chat.schema';
 import { WhatsappMessage, WhatsappMessageSchema } from './schemas/whatsapp-message.schema';
 import { WhatsappLocalMediaStorageService } from './whatsapp-local-media-storage.service';
@@ -75,7 +77,14 @@ import { whatsappClientProvider } from './providers/whatsapp-client.provider';
     WsChatMsgHandlerService,
     WhatsappCloudService,
     DeepSeekService,
+    RecruitingWhatsappCaptureService,
+    CvTextExtractorService,
   ],
-  exports: [WhatsappCloudService, DeepSeekService, WsChatMsgHandlerService],
+  exports: [
+    WhatsappCloudService,
+    DeepSeekService,
+    WsChatMsgHandlerService,
+    RecruitingWhatsappCaptureService,
+  ],
 })
 export class WhatsappCloudModule {}

@@ -12,6 +12,7 @@ import {
 import { WhatsappCloudService } from './whatsapp-cloud.service';
 import { WsChatMsgHandlerService } from './ws-chat-msg-handler.service';
 import { DeepSeekService } from './deep-seek.service';
+import { RecruitingWhatsappCaptureService } from './recruiting-whatsapp-capture.service';
 import { SendTextDto } from './dto/send-text.dto';
 import { SendHelloWorldTemplateDto } from './dto/send-hellow-world-template.dto';
 import { SendTemplateInfoTrainingDto } from './dto/send-template-info-training.dto';
@@ -33,6 +34,7 @@ export class WhatsappCloudController {
   public constructor(
     private readonly whatsappCloudService: WhatsappCloudService,
     private readonly deepSeekService: DeepSeekService,
+    private readonly recruitingWhatsappCaptureService: RecruitingWhatsappCaptureService,
     private readonly wsChatMsgHandlerService: WsChatMsgHandlerService,
     @Inject('CRM_BACK_QUEUE') private readonly crmBackQueueClient: ClientProxy,
     @Inject('CUSTOMERS_MS_INTEGRATION')
@@ -101,6 +103,16 @@ export class WhatsappCloudController {
         await this.emitInboundUserMessageToCrmBack(value, messageRecord);
         const messageType = messageRecord.type;
         console.log({ messageType });
+        if (messageType === 'document' || messageType === 'video') {
+          const handledRecruitingMedia = await this.routeRecruitingMedia({
+            value,
+            messageRecord,
+            messageType,
+          });
+          if (handledRecruitingMedia) {
+            continue;
+          }
+        }
         if (messageType === 'interactive') {
           const interactive = messageRecord.interactive as Record<string, unknown> | undefined;
           const interactiveType = interactive?.type;
@@ -178,6 +190,21 @@ export class WhatsappCloudController {
               ? profile.name.trim()
               : undefined;
 
+          const recruitingReplyText =
+            messageType === 'text'
+              ? textBodyString.trim()
+              : (buttonTextString || buttonPayloadString).trim();
+          if (
+            recruitingReplyText.length > 0 &&
+            this.recruitingWhatsappCaptureService.hasActiveSessionForPhone(waId) &&
+            (await this.recruitingWhatsappCaptureService.handleInboundText({
+              waId,
+              text: recruitingReplyText,
+            }))
+          ) {
+            continue;
+          }
+
           if (
             await this.handleGreetingMessageReply({
               buttonPayloadString,
@@ -215,6 +242,14 @@ export class WhatsappCloudController {
           }
 
           if (messageType === 'text' && textBodyString.trim().length > 0) {
+            const handledRecruiting =
+              await this.recruitingWhatsappCaptureService.handleInboundText({
+                waId,
+                text: textBodyString.trim(),
+              });
+            if (handledRecruiting) {
+              continue;
+            }
             await this.maybeSendDeepSeekLotesReply({
               waId,
               textBody: textBodyString.trim(),
@@ -384,6 +419,41 @@ export class WhatsappCloudController {
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       this.logger.warn(`maybeSendDeepSeekLotesReply failed: ${message}`);
+    }
+  }
+
+  /**
+   * Routes candidate CV/video messages to the recruiting session; returns true when handled.
+   */
+  private async routeRecruitingMedia(input: {
+    value: Record<string, unknown>;
+    messageRecord: Record<string, unknown>;
+    messageType: string;
+  }): Promise<boolean> {
+    const fromRaw = input.messageRecord.from;
+    const contacts = input.value.contacts as Array<Record<string, unknown>> | undefined;
+    const contactWaId = contacts?.[0]?.wa_id;
+    const waId =
+      typeof fromRaw === 'string' && fromRaw.length > 0
+        ? fromRaw
+        : typeof contactWaId === 'string'
+          ? contactWaId
+          : '';
+    const whatsappMessageId =
+      typeof input.messageRecord.id === 'string' ? input.messageRecord.id : '';
+    if (waId.length === 0 || whatsappMessageId.length === 0) {
+      return false;
+    }
+    try {
+      return await this.recruitingWhatsappCaptureService.handleInboundMedia({
+        waId,
+        whatsappMessageId,
+        messageType: input.messageType,
+      });
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      this.logger.warn(`routeRecruitingMedia failed: ${msg}`);
+      return false;
     }
   }
 
