@@ -580,12 +580,18 @@ export class WsChatMsgHandlerService {
         mediaId: picked.id,
         phoneNumberId: input.phoneNumberId,
       });
-      const buffer = await this.whatsAppClient.media.download({
+      // Meta's lookaside media URL requires the bearer token; Kapso's "auto" mode only sends it to kapso.ai hosts.
+      const response = (await this.whatsAppClient.media.download({
         mediaId: picked.id,
         phoneNumberId: input.phoneNumberId,
-        as: 'arrayBuffer',
-      });
-      const nodeBuffer = Buffer.from(buffer as ArrayBuffer);
+        auth: 'always',
+        as: 'response',
+      })) as Response;
+      if (!response.ok) {
+        const detail = (await response.text()).slice(0, 300);
+        throw new Error(`media download HTTP ${response.status}: ${detail}`);
+      }
+      const nodeBuffer = Buffer.from(await response.arrayBuffer());
       const saved = await this.localMediaStorage.saveInboundMedia({
         waId: input.waId,
         whatsappMessageId: input.message.id,
