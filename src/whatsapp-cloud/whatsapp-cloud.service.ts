@@ -726,6 +726,59 @@ export class WhatsappCloudService {
     return this.msgTemplate(templateMessage);
   }
 
+  /**
+   * Recruiting opener after the voice call. Template name/language come from Job Campaign setup
+   * (defaults: `candidate_opening_message` / `spa`). Body requires named param `contact_name`.
+   */
+  public async sendRecruitingOpeningTemplate(input: {
+    readonly phoneNumber: string;
+    readonly templateName: string;
+    readonly languageCode: string;
+    readonly contactName: string;
+  }): Promise<unknown> {
+    const templateName = input.templateName.trim();
+    const languageCode = input.languageCode.trim();
+    const contactName = input.contactName.trim();
+    if (templateName.length === 0 || languageCode.length === 0) {
+      throw new HttpException(
+        'Recruiting opening template requires templateName and languageCode',
+        HttpStatus.BAD_REQUEST,
+      );
+    }
+    if (contactName.length === 0) {
+      throw new HttpException(
+        'Recruiting opening template requires contactName (contact_name)',
+        HttpStatus.BAD_REQUEST,
+      );
+    }
+    const templateMessage: WhatsAppMessageTemplate = {
+      to: input.phoneNumber,
+      messaging_product: 'whatsapp',
+      recipient_type: 'individual',
+      type: 'template',
+      template: {
+        name: templateName,
+        language: { code: languageCode },
+        components: [
+          {
+            type: 'body',
+            parameters: [
+              {
+                type: 'text',
+                text: contactName,
+                parameter_name: 'contact_name',
+              },
+            ],
+          },
+        ],
+      },
+    };
+    this.logger.log(
+      `[sendRecruitingOpeningTemplate] ${templateName}/${languageCode} contact_name=${contactName} → ${input.phoneNumber}`,
+    );
+    return this.msgTemplate(templateMessage);
+  }
+
   private buildCapacitacion12HoraTemplateMessage(input: {
     phoneNumber: string;
     contactName: string;
