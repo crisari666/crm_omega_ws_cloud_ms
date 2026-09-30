@@ -3,6 +3,7 @@ import {
   Body,
   Controller,
   Get,
+  Headers,
   HttpCode,
   HttpStatus,
   Logger,
@@ -119,6 +120,50 @@ export class WhatsappChatController {
     stream.pipe(res);
   }
 
+  /**
+   * Streams a recruiting CV/video by WhatsApp message id (supports Range for video seeking).
+   */
+  @Get('recruiting/media/:whatsappMessageId')
+  async streamRecruitingMedia(
+    @Param('whatsappMessageId') whatsappMessageId: string,
+    @Headers('range') range: string | undefined,
+    @Res() res: Response,
+  ): Promise<void> {
+    const media =
+      await this.wsChatMsgHandlerService.findInboundMediaByWhatsappMessageId(whatsappMessageId);
+    if (media == null) {
+      throw new NotFoundException('Recruiting media not found');
+    }
+    let fileSize = 0;
+    try {
+      fileSize = (await stat(media.absolutePath)).size;
+    } catch {
+      throw new NotFoundException('Recruiting media file missing');
+    }
+    const byteRange = this.parseByteRange(range, fileSize);
+    res.setHeader('Content-Type', media.mimeType);
+    res.setHeader('Accept-Ranges', 'bytes');
+    if (media.filename.length > 0) {
+      res.setHeader('Content-Disposition', `inline; filename="${encodeURIComponent(media.filename)}"`);
+    }
+    if (byteRange != null) {
+      res.status(HttpStatus.PARTIAL_CONTENT);
+      res.setHeader('Content-Range', `bytes ${byteRange.start}-${byteRange.end}/${fileSize}`);
+      res.setHeader('Content-Length', String(byteRange.end - byteRange.start + 1));
+    } else {
+      res.status(HttpStatus.OK);
+      res.setHeader('Content-Length', String(fileSize));
+    }
+    const stream = createReadStream(media.absolutePath, byteRange ?? undefined);
+    stream.on('error', (err) => {
+      this.logger.warn(`Recruiting media stream error: ${err instanceof Error ? err.message : String(err)}`);
+      if (!res.headersSent) {
+        res.status(500).end();
+      }
+    });
+    stream.pipe(res);
+  }
+
   @Post('chats/:chatId/messages/text')
   @HttpCode(HttpStatus.OK)
   async sendTextForChat(
@@ -202,6 +247,26 @@ export class WhatsappChatController {
       to: waId,
       sticker: { id: dto.id, link: dto.link },
     });
+  }
+
+  private parseByteRange(
+    range: string | undefined,
+    fileSize: number,
+  ): { start: number; end: number } | null {
+    const match = /^bytes=(\d*)-(\d*)$/.exec((range ?? '').trim());
+    if (match == null || fileSize === 0) {
+      return null;
+    }
+    const lastByte = fileSize - 1;
+    const isSuffixRange = match[1].length === 0;
+    const start = isSuffixRange
+      ? Math.max(0, fileSize - Number(match[2]))
+      : Number(match[1]);
+    const end = !isSuffixRange && match[2].length > 0 ? Math.min(Number(match[2]), lastByte) : lastByte;
+    if (!Number.isFinite(start) || start > end || start > lastByte) {
+      return null;
+    }
+    return { start, end };
   }
 
   private assertIdOrLink(id?: string, link?: string): void {
