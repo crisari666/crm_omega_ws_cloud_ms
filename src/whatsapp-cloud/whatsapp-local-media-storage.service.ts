@@ -80,4 +80,27 @@ export class WhatsappLocalMediaStorageService {
     }
     return resolved;
   }
+
+  /**
+   * Deletes the per-message folder holding a stored media file. Returns false when the path is unsafe or missing.
+   */
+  public async deleteStoredMedia(relativePath: string): Promise<boolean> {
+    const absolutePath = this.resolveSafeAbsolutePath(relativePath);
+    if (absolutePath == null) {
+      this.logger.warn(`deleteStoredMedia refused path outside base: ${relativePath}`);
+      return false;
+    }
+    const baseDir = path.resolve(this.getBaseDir());
+    const messageDir = path.dirname(absolutePath);
+    if (!messageDir.startsWith(baseDir + path.sep)) {
+      return false;
+    }
+    try {
+      await fs.access(messageDir);
+    } catch {
+      return false;
+    }
+    await fs.rm(messageDir, { recursive: true, force: true });
+    return true;
+  }
 }

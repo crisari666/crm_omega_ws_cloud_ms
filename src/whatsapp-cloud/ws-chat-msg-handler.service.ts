@@ -14,6 +14,8 @@ import type { PaginatedResult } from './types/paginated-result.type';
 import type { LotesChatDuplicateInboundSuppression } from './interfaces/lotes-chat-duplicate-inbound-suppression.interface';
 import type { WhatsappLlmConversationTurn } from './interfaces/whatsapp-llm-conversation-turn.interface';
 import type { InboundStoredMedia } from './interfaces/inbound-stored-media.interface';
+import type { RecruitingPurgeInput } from './interfaces/recruiting-purge-input.interface';
+import type { RecruitingPurgeResult } from './interfaces/recruiting-purge-result.interface';
 import { normalizeInboundTextForDuplicateCompare } from './utils/normalize-inbound-text-for-duplicate-compare.util';
 import { WhatsappLocalMediaStorageService } from './whatsapp-local-media-storage.service';
 import { normalizeWaId } from './utils/normalize-wa-id.util';
@@ -423,6 +425,63 @@ export class WsChatMsgHandlerService {
   /**
    * Finds an inbound message with downloaded media by its WhatsApp message id (wamid).
    */
+  /**
+   * Deletes a removed recruiting candidate's messages (since `since`, plus CV/video ids) and their stored media.
+   * Chats left empty are deleted; others get `lastMessageAt` recomputed.
+   */
+  public async purgeRecruitingMessages(input: RecruitingPurgeInput): Promise<RecruitingPurgeResult> {
+    const waId = normalizeWaId(input.phone);
+    if (waId.length === 0) {
+      return { deletedMessages: 0, deletedFiles: 0 };
+    }
+    const chats = await this.chatModel.find({ waId }).select({ _id: 1 }).lean().exec();
+    const chatIds = chats.map((chat) => chat._id);
+    if (chatIds.length === 0) {
+      return { deletedMessages: 0, deletedFiles: 0 };
+    }
+    const filter = {
+      chat: { $in: chatIds },
+      $or: [
+        { timestamp: { $gte: input.since } },
+        ...(input.mediaMessageIds.length > 0
+          ? [{ whatsappMessageId: { $in: [...input.mediaMessageIds] } }]
+          : []),
+      ],
+    };
+    const messages = await this.messageModel.find(filter).select({ media: 1 }).lean().exec();
+    const deletedFiles = await this.deleteMessagesMedia(messages);
+    const { deletedCount } = await this.messageModel.deleteMany(filter);
+    await Promise.all(chatIds.map((chatId) => this.refreshOrDeleteChat(chatId)));
+    return { deletedMessages: deletedCount ?? 0, deletedFiles };
+  }
+
+  private async deleteMessagesMedia(
+    messages: ReadonlyArray<{ media?: WhatsappMessageMedia }>,
+  ): Promise<number> {
+    const relativePaths = messages
+      .map((message) => message.media?.storedRelativePath ?? '')
+      .filter((relativePath) => relativePath.length > 0);
+    const results = await Promise.all(
+      relativePaths.map((relativePath) => this.localMediaStorage.deleteStoredMedia(relativePath)),
+    );
+    return results.filter(Boolean).length;
+  }
+
+  private async refreshOrDeleteChat(chatId: Types.ObjectId): Promise<void> {
+    const latest = await this.messageModel
+      .findOne({ chat: chatId })
+      .sort({ timestamp: -1 })
+      .select({ timestamp: 1 })
+      .lean()
+      .exec();
+    if (latest == null) {
+      await this.chatModel.deleteOne({ _id: chatId });
+      return;
+    }
+    await this.chatModel.updateOne({ _id: chatId }, { $set: { lastMessageAt: latest.timestamp } });
+  }
+
+
   public async findInboundMediaByWhatsappMessageId(
     whatsappMessageId: string,
   ): Promise<InboundStoredMedia | null> {
