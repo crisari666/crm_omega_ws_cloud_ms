@@ -27,6 +27,14 @@ import { matchesVideoInterestedInput } from './utils/match-video-interested.util
 import { WHATSAPP_ECOSYSTEM_HEALTH_DELIVERY_ERROR_CODE } from './utils/whatsapp-ecosystem-delivery.constants';
 import { matchesTrainingAgendarInput } from './utils/match-training-agendar.util';
 
+const RECRUITING_MEDIA_TYPES: ReadonlySet<string> = new Set([
+  'document',
+  'video',
+  'image',
+  'audio',
+  'sticker',
+]);
+
 @Controller('whatsapp-cloud')
 export class WhatsappCloudController {
   private readonly logger = new Logger(WhatsappCloudController.name);
@@ -103,7 +111,7 @@ export class WhatsappCloudController {
         await this.emitInboundUserMessageToCrmBack(value, messageRecord);
         const messageType = messageRecord.type;
         console.log({ messageType });
-        if (messageType === 'document' || messageType === 'video') {
+        if (typeof messageType === 'string' && RECRUITING_MEDIA_TYPES.has(messageType)) {
           const handledRecruitingMedia = await this.routeRecruitingMedia({
             value,
             messageRecord,
@@ -196,7 +204,7 @@ export class WhatsappCloudController {
               : (buttonTextString || buttonPayloadString).trim();
           if (
             recruitingReplyText.length > 0 &&
-            this.recruitingWhatsappCaptureService.hasActiveSessionForPhone(waId) &&
+            (await this.recruitingWhatsappCaptureService.hasActiveSessionForPhone(waId)) &&
             (await this.recruitingWhatsappCaptureService.handleInboundText({
               waId,
               text: recruitingReplyText,

@@ -1,6 +1,8 @@
 import { Inject, Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { ClientProxy } from '@nestjs/microservices';
+import { InjectModel } from '@nestjs/mongoose';
+import { Model } from 'mongoose';
 import OpenAI from 'openai';
 import type {
   ChatCompletionMessageParam,
@@ -11,6 +13,10 @@ import { WhatsappCloudService } from './whatsapp-cloud.service';
 import { WsChatMsgHandlerService } from './ws-chat-msg-handler.service';
 import { CvTextExtractorService } from './cv-text-extractor.service';
 import type { InboundStoredMedia } from './interfaces/inbound-stored-media.interface';
+import {
+  RecruitingCaptureSession,
+  RecruitingCaptureSessionDocument,
+} from './schemas/recruiting-capture-session.schema';
 
 type CaptureField = {
   readonly key: string;
@@ -39,6 +45,8 @@ type RecruitingSession = {
   dataComplete: boolean;
   interviewAccepted: boolean;
   stage: RecruitingStage;
+  cvReceived: boolean;
+  cvRequested: boolean;
 };
 
 type CrmBackEventPayload = {
@@ -48,15 +56,15 @@ type CrmBackEventPayload = {
 
 const RECRUITING_TOOL_ROUNDS_MAX = 6;
 const DEFAULT_CV_REQUEST_MESSAGE =
-  '¡Perfecto, gracias! 📄 El siguiente paso es que me envíes tu hoja de vida (CV) en PDF o Word por este chat.';
+  '¡Perfecto, gracias! 📄 El siguiente paso es que me envíes tu hoja de vida (CV) en formato PDF por este chat.';
 const DEFAULT_VIDEO_REQUEST_MESSAGE =
   '¡Recibimos tu hoja de vida! 🎥 Ahora envíanos un video de máximo 1 minuto presentándote: quién eres, tu experiencia y por qué quieres unirte al equipo.';
 const DEFAULT_VIDEO_RECEIVED_MESSAGE =
   '¡Gracias por tu video! En un momento te enviamos el enlace de la reunión virtual.';
 const CV_REMINDER_MESSAGE =
-  'Para continuar necesitamos tu hoja de vida (CV). Envíala por este chat como archivo PDF o Word.';
+  'Para continuar necesitamos tu hoja de vida (CV). Envíala por este chat como archivo PDF.';
 const CV_INVALID_FORMAT_MESSAGE =
-  'Ese archivo no es un PDF ni un Word. Por favor envía tu hoja de vida (CV) en formato PDF o Word (.docx).';
+  '📄 Solo podemos recibir tu hoja de vida en formato PDF. Por favor conviértela a PDF y envíala de nuevo por este chat. 😊';
 const VIDEO_REMINDER_MESSAGE =
   'Para terminar tu proceso solo falta tu video de presentación (máximo 1 minuto). Envíalo por este chat.';
 const VIDEO_INVALID_FORMAT_MESSAGE =
@@ -71,8 +79,6 @@ const VIDEO_MIME_PREFIX = 'video/';
 @Injectable()
 export class RecruitingWhatsappCaptureService {
   private readonly logger = new Logger(RecruitingWhatsappCaptureService.name);
-  private readonly sessionsByPhone = new Map<string, RecruitingSession>();
-  private readonly sessionsByCandidateId = new Map<string, RecruitingSession>();
   private openaiClient: OpenAI | null = null;
 
   public constructor(
@@ -81,10 +87,20 @@ export class RecruitingWhatsappCaptureService {
     private readonly wsChatMsgHandlerService: WsChatMsgHandlerService,
     private readonly cvTextExtractorService: CvTextExtractorService,
     @Inject('CRM_BACK_QUEUE') private readonly crmBackQueueClient: ClientProxy,
+    @InjectModel(RecruitingCaptureSession.name)
+    private readonly sessionModel: Model<RecruitingCaptureSessionDocument>,
   ) {}
 
-  public hasActiveSessionForPhone(phone: string): boolean {
-    return this.sessionsByPhone.has(this.normalizePhone(phone));
+  /**
+   * Deletes the session of a removed candidate so later replies use the normal handlers.
+   */
+  public async endSessionForCandidate(candidateId: string): Promise<boolean> {
+    const { deletedCount } = await this.sessionModel.deleteOne({ candidateId });
+    return deletedCount > 0;
+  }
+
+  public async hasActiveSessionForPhone(phone: string): Promise<boolean> {
+    return (await this.findSessionByPhone(phone)) != null;
   }
 
   public async startCapture(input: {
@@ -93,6 +109,8 @@ export class RecruitingWhatsappCaptureService {
     readonly to: string;
     readonly whatsappAgentPrompt: string;
     readonly captureFields: readonly CaptureField[];
+    /** Field values already known (e.g. from the Facebook lead); the agent must not ask for them. */
+    readonly prefilledData?: Readonly<Record<string, string>>;
     readonly contactName?: string;
     /** When true, session is armed but no free-text opener is sent (template already opened the chat). */
     readonly skipTextOpener?: boolean;
@@ -122,8 +140,13 @@ PROHIBIDO saludar de nuevo (no digas "Hola", "Buenos días", ni te presentes otr
 Cuando el candidato responda, continúa DIRECTO pidiendo el siguiente dato pendiente de la lista de campos (sin re-saludo).
 `
       : '';
+    const prefilledData = { ...(input.prefilledData ?? {}) };
+    const knownDataBlock = this.buildKnownDataBlock({ fields, prefilledData });
+    const isDataComplete = fields
+      .filter((f) => f.required)
+      .every((f) => (prefilledData[f.key] ?? '').length > 0);
     const systemPrompt = `${input.whatsappAgentPrompt}
-${noRegreetBlock}
+${noRegreetBlock}${knownDataBlock}
 # Campos a capturar (usa saveCapturedField)
 ${fieldList}
 
@@ -149,14 +172,42 @@ ${fieldList}
           DEFAULT_VIDEO_RECEIVED_MESSAGE,
         ),
       },
-      capturedData: {},
+      capturedData: prefilledData,
       messages: [{ role: 'system', content: systemPrompt }],
-      dataComplete: false,
+      dataComplete: isDataComplete,
       interviewAccepted: false,
-      stage: 'collecting_data',
+      stage: isDataComplete ? 'awaiting_cv' : 'collecting_data',
+      cvReceived: false,
+      cvRequested: false,
     };
-    this.sessionsByPhone.set(to, session);
-    this.sessionsByCandidateId.set(input.candidateId, session);
+    await this.sessionModel.deleteMany({ phone: to, candidateId: { $ne: input.candidateId } });
+    try {
+      await this.sendSessionOpening({
+        session,
+        contactName,
+        templateAlreadySent,
+        openingTemplateLabel: input.openingTemplateLabel,
+      });
+    } finally {
+      await this.saveSession(session);
+    }
+  }
+
+  private async sendSessionOpening(input: {
+    readonly session: RecruitingSession;
+    readonly contactName: string;
+    readonly templateAlreadySent: boolean;
+    readonly openingTemplateLabel?: string;
+  }): Promise<void> {
+    const { session, contactName, templateAlreadySent } = input;
+    const isDataComplete = session.dataComplete;
+    if (isDataComplete) {
+      await this.emitCrmEvent({
+        action: 'recruiting.data_complete',
+        candidateId: session.candidateId,
+        campaignId: session.campaignId,
+      });
+    }
     if (templateAlreadySent) {
       const label =
         input.openingTemplateLabel != null &&
@@ -172,20 +223,24 @@ ${fieldList}
         content: greetingAlreadySent,
       });
       await this.emitConversationTurn({
-        candidateId: input.candidateId,
+        candidateId: session.candidateId,
         role: 'assistant',
         text: `[WhatsApp template: ${label}]`,
       });
       return;
     }
+    if (isDataComplete) {
+      await this.sendCvRequest(session);
+      return;
+    }
     const opener =
-      input.contactName != null && input.contactName.trim().length > 0
-        ? `Hola ${input.contactName.trim()}, soy el asistente de inteligencia artificial de selección. ¿Me compartes tu nombre completo para continuar?`
+      contactName.length > 0
+        ? `Hola ${contactName}, soy el asistente de inteligencia artificial de selección. ¿Me compartes tu nombre completo para continuar?`
         : 'Hola, soy el asistente de inteligencia artificial de selección. ¿Me compartes tu nombre completo para continuar?';
     session.messages.push({ role: 'assistant', content: opener });
-    await this.whatsappCloudService.sendTextMessage(to, opener);
+    await this.whatsappCloudService.sendTextMessage(session.to, opener);
     await this.emitConversationTurn({
-      candidateId: input.candidateId,
+      candidateId: session.candidateId,
       role: 'assistant',
       text: opener,
     });
@@ -195,11 +250,19 @@ ${fieldList}
     readonly waId: string;
     readonly text: string;
   }): Promise<boolean> {
-    const session = this.sessionsByPhone.get(this.normalizePhone(input.waId));
-    if (session == null || session.stage === 'done') {
+    const session = await this.findSessionByPhone(input.waId);
+    if (session == null) {
       return false;
     }
-    const text = input.text.trim();
+    try {
+      return await this.processInboundText(session, input.text);
+    } finally {
+      await this.saveSession(session);
+    }
+  }
+
+  private async processInboundText(session: RecruitingSession, rawText: string): Promise<boolean> {
+    const text = rawText.trim();
     if (text.length === 0) {
       return true;
     }
@@ -210,22 +273,40 @@ ${fieldList}
       text,
     });
     if (session.stage === 'awaiting_cv') {
-      await this.sendAssistantText(session, CV_REMINDER_MESSAGE);
+      if (session.cvRequested) {
+        await this.sendAssistantText(session, CV_REMINDER_MESSAGE);
+      } else {
+        await this.sendCvRequest(session);
+      }
       return true;
     }
     if (session.stage === 'awaiting_video') {
       await this.sendAssistantText(session, VIDEO_REMINDER_MESSAGE);
       return true;
     }
+    await this.replyWithAgentTurn(session);
+    return true;
+  }
+
+  /** Runs the capture agent and sends either its reply or the next stage request. */
+  private async replyWithAgentTurn(session: RecruitingSession): Promise<void> {
     const reply = await this.runAgentTurn(session);
-    if (this.isAwaitingCv(session)) {
-      await this.sendAssistantText(session, session.stageMessages.cvRequestMessage);
-      return true;
+    if (session.stage === 'awaiting_cv') {
+      await this.sendCvRequest(session);
+      return;
+    }
+    if (session.stage === 'awaiting_video') {
+      await this.sendAssistantText(session, session.stageMessages.videoRequestMessage);
+      return;
     }
     if (reply != null && reply.trim().length > 0) {
       await this.sendAssistantText(session, reply);
     }
-    return true;
+  }
+
+  private async sendCvRequest(session: RecruitingSession): Promise<void> {
+    session.cvRequested = true;
+    await this.sendAssistantText(session, session.stageMessages.cvRequestMessage);
   }
 
   /**
@@ -237,16 +318,34 @@ ${fieldList}
     readonly whatsappMessageId: string;
     readonly messageType: string;
   }): Promise<boolean> {
-    const session = this.sessionsByPhone.get(this.normalizePhone(input.waId));
+    const session = await this.findSessionByPhone(input.waId);
     if (session == null) {
       return false;
     }
-    if (session.stage !== 'awaiting_cv' && session.stage !== 'awaiting_video') {
+    try {
+      return await this.processInboundMedia(session, input);
+    } finally {
+      await this.saveSession(session);
+    }
+  }
+
+  private async processInboundMedia(
+    session: RecruitingSession,
+    input: { readonly whatsappMessageId: string; readonly messageType: string },
+  ): Promise<boolean> {
+    if (session.stage === 'collecting_data' && session.cvReceived) {
       return false;
     }
     const media = await this.wsChatMsgHandlerService.findInboundMediaByWhatsappMessageId(
       input.whatsappMessageId,
     );
+    if (session.stage === 'collecting_data') {
+      if (media == null) {
+        return false;
+      }
+      await this.processEarlyCvMedia(session, media);
+      return true;
+    }
     if (media == null) {
       await this.sendAssistantText(session, MEDIA_NOT_AVAILABLE_MESSAGE);
       return true;
@@ -277,14 +376,55 @@ ${fieldList}
     session: RecruitingSession,
     media: InboundStoredMedia,
   ): Promise<void> {
-    const isCvFile = this.cvTextExtractorService.isSupportedCvFile({
+    if (!this.isPdfMedia(media)) {
+      await this.rejectNonPdfCv(session, media);
+      return;
+    }
+    await this.storeCvMedia(session, media);
+    session.stage = 'awaiting_video';
+    await this.sendAssistantText(session, session.stageMessages.videoRequestMessage);
+  }
+
+  /**
+   * Handles a file sent before the data step finished: a PDF is stored as the CV and the agent
+   * continues with the missing fields; any other file is rejected.
+   */
+  private async processEarlyCvMedia(
+    session: RecruitingSession,
+    media: InboundStoredMedia,
+  ): Promise<void> {
+    if (!this.isPdfMedia(media)) {
+      await this.rejectNonPdfCv(session, media);
+      return;
+    }
+    await this.storeCvMedia(session, media);
+    session.messages.push({
+      role: 'user',
+      content: '[El candidato envió su hoja de vida (CV); ya quedó guardada, no la pidas.]',
+    });
+    await this.replyWithAgentTurn(session);
+  }
+
+  private isPdfMedia(media: InboundStoredMedia): boolean {
+    return this.cvTextExtractorService.isPdfFile({
       mimeType: media.mimeType,
       filename: media.filename,
     });
-    if (!isCvFile) {
-      await this.sendAssistantText(session, CV_INVALID_FORMAT_MESSAGE);
-      return;
-    }
+  }
+
+  /** Only PDF CVs are kept: the file is deleted and the candidate is asked to resend it as PDF. */
+  private async rejectNonPdfCv(
+    session: RecruitingSession,
+    media: InboundStoredMedia,
+  ): Promise<void> {
+    await this.wsChatMsgHandlerService.discardInboundMedia(media);
+    await this.sendAssistantText(session, CV_INVALID_FORMAT_MESSAGE);
+  }
+
+  private async storeCvMedia(
+    session: RecruitingSession,
+    media: InboundStoredMedia,
+  ): Promise<void> {
     const cvText = await this.cvTextExtractorService.extractText({
       absolutePath: media.absolutePath,
       mimeType: media.mimeType,
@@ -296,8 +436,7 @@ ${fieldList}
       text: `[CV recibido: ${media.filename || 'documento'}]`,
     });
     await this.emitMediaReceived({ session, media, action: 'recruiting.cv_received', cvText });
-    session.stage = 'awaiting_video';
-    await this.sendAssistantText(session, session.stageMessages.videoRequestMessage);
+    session.cvReceived = true;
   }
 
   private async processVideoMedia(
@@ -358,8 +497,20 @@ ${fieldList}
     );
   }
 
-  private isAwaitingCv(session: RecruitingSession): boolean {
-    return session.stage === 'awaiting_cv';
+  private buildKnownDataBlock(input: {
+    readonly fields: readonly CaptureField[];
+    readonly prefilledData: Readonly<Record<string, string>>;
+  }): string {
+    const lines = input.fields
+      .filter((f) => (input.prefilledData[f.key] ?? '').length > 0)
+      .map((f) => `- ${f.key} (${f.label}): ${input.prefilledData[f.key]}`);
+    if (lines.length === 0) {
+      return '';
+    }
+    return `
+# Datos ya conocidos (NO los pidas de nuevo)
+${lines.join('\n')}
+`;
   }
 
   private pickText(value: string | undefined, fallback: string): string {
@@ -453,7 +604,7 @@ ${fieldList}
     }
     if (name === 'markDataComplete') {
       session.dataComplete = true;
-      session.stage = 'awaiting_cv';
+      session.stage = session.cvReceived ? 'awaiting_video' : 'awaiting_cv';
       await this.emitCrmEvent({
         action: 'recruiting.data_complete',
         candidateId: session.candidateId,
@@ -461,8 +612,9 @@ ${fieldList}
       });
       return {
         ok: true,
-        message:
-          'Datos completos. El sistema enviará automáticamente la solicitud del CV. NO escribas ningún mensaje adicional.',
+        message: session.cvReceived
+          ? 'Datos completos. El sistema enviará automáticamente la solicitud del video. NO escribas ningún mensaje adicional.'
+          : 'Datos completos. El sistema enviará automáticamente la solicitud del CV. NO escribas ningún mensaje adicional.',
       };
     }
     if (name === 'markInterviewAccepted') {
@@ -549,6 +701,41 @@ ${fieldList}
       apiKey: apiKey.trim(),
     });
     return this.openaiClient;
+  }
+
+  private async findSessionByPhone(phone: string): Promise<RecruitingSession | null> {
+    const doc = await this.sessionModel
+      .findOne({ phone: this.normalizePhone(phone), stage: { $ne: 'done' } })
+      .sort({ updatedAt: -1 })
+      .lean()
+      .exec();
+    if (doc == null) {
+      return null;
+    }
+    return {
+      campaignId: doc.campaignId,
+      candidateId: doc.candidateId,
+      to: doc.phone,
+      whatsappAgentPrompt: doc.whatsappAgentPrompt ?? '',
+      captureFields: (doc.captureFields ?? []) as unknown as CaptureField[],
+      stageMessages: doc.stageMessages as unknown as RecruitingStageMessages,
+      capturedData: doc.capturedData ?? {},
+      messages: (doc.messages ?? []) as unknown as ChatCompletionMessageParam[],
+      dataComplete: doc.dataComplete,
+      interviewAccepted: doc.interviewAccepted,
+      stage: doc.stage as RecruitingStage,
+      cvReceived: doc.cvReceived,
+      cvRequested: doc.cvRequested,
+    };
+  }
+
+  private async saveSession(session: RecruitingSession): Promise<void> {
+    const { to, ...state } = session;
+    await this.sessionModel.updateOne(
+      { candidateId: session.candidateId },
+      { $set: { ...state, phone: to } },
+      { upsert: true },
+    );
   }
 
   private normalizePhone(phone: string): string {

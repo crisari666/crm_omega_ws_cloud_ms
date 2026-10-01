@@ -4,6 +4,7 @@ import { ClientProxy } from '@nestjs/microservices';
 import { lastValueFrom } from 'rxjs';
 import { WhatsappCloudService } from './whatsapp-cloud.service';
 import { RecruitingWhatsappCaptureService } from './recruiting-whatsapp-capture.service';
+import { WsChatMsgHandlerService } from './ws-chat-msg-handler.service';
 
 type CrmBackEventSourceType = 'ws_ms_events' | 'voice_agent_ms_events';
 
@@ -38,6 +39,7 @@ export class WhatsappOnboardingEventsController {
   public constructor(
     private readonly whatsappCloudService: WhatsappCloudService,
     private readonly recruitingWhatsappCaptureService: RecruitingWhatsappCaptureService,
+    private readonly wsChatMsgHandlerService: WsChatMsgHandlerService,
     @Inject('CRM_BACK_QUEUE') private readonly crmBackQueueClient: ClientProxy,
   ) {}
 
@@ -95,6 +97,9 @@ export class WhatsappOnboardingEventsController {
     if (actionValue === 'send.recruiting_meet_link') {
       await this.handleRecruitingMeetLink(payload);
       return { success: true };
+    }
+    if (actionValue === 'recruiting.purge_candidate') {
+      return this.handleRecruitingPurgeCandidate(payload);
     }
     return { success: false, message: 'unsupported action' };
   }
@@ -632,6 +637,7 @@ export class WhatsappOnboardingEventsController {
       to,
       whatsappAgentPrompt,
       captureFields,
+      prefilledData: this.readStringRecord(payload.prefilledData),
       contactName: contactName.length > 0 ? contactName : undefined,
       skipTextOpener: true,
       openingTemplateLabel: `${templateName} (${templateLanguage})`,
@@ -641,9 +647,50 @@ export class WhatsappOnboardingEventsController {
     });
   }
 
+  /**
+   * Removed candidate: end the capture session and delete its WhatsApp messages and media files.
+   */
+  private async handleRecruitingPurgeCandidate(
+    payload: Record<string, unknown>,
+  ): Promise<{ success: boolean; message?: string }> {
+    const candidateId = this.readOptionalString(payload.candidateId) ?? '';
+    const phone = this.readOptionalString(payload.phone) ?? '';
+    if (candidateId.length === 0 || phone.length === 0) {
+      return { success: false, message: 'missing candidateId or phone' };
+    }
+    const sinceDate = new Date(this.readOptionalString(payload.sinceIso) ?? Number.NaN);
+    const mediaMessageIds = Array.isArray(payload.mediaMessageIds)
+      ? payload.mediaMessageIds
+          .map((value) => this.readOptionalString(value))
+          .filter((value): value is string => value != null)
+      : [];
+    await this.recruitingWhatsappCaptureService.endSessionForCandidate(candidateId);
+    const result = await this.wsChatMsgHandlerService.purgeRecruitingMessages({
+      phone,
+      since: Number.isNaN(sinceDate.getTime()) ? new Date() : sinceDate,
+      mediaMessageIds,
+    });
+    this.logger.log(
+      `Purged recruiting candidate ${candidateId}: ${result.deletedMessages} messages, ${result.deletedFiles} media folders`,
+    );
+    return { success: true };
+  }
+
   private readOptionalString(value: unknown): string | undefined {
     return typeof value === 'string' && value.trim().length > 0 ? value.trim() : undefined;
   }
+
+  private readStringRecord(value: unknown): Record<string, string> {
+    if (value == null || typeof value !== 'object') return {};
+    return Object.entries(value as Record<string, unknown>).reduce<Record<string, string>>(
+      (acc, [key, raw]) => {
+        const text = this.readOptionalString(raw);
+        return text != null ? { ...acc, [key]: text } : acc;
+      },
+      {},
+    );
+  }
+
 
   private async handleRecruitingMeetLink(
     payload: Record<string, unknown>,

@@ -481,6 +481,16 @@ export class WsChatMsgHandlerService {
     await this.chatModel.updateOne({ _id: chatId }, { $set: { lastMessageAt: latest.timestamp } });
   }
 
+  /**
+   * Deletes a rejected inbound file from disk and unlinks it from its message.
+   */
+  public async discardInboundMedia(media: InboundStoredMedia): Promise<void> {
+    await this.localMediaStorage.deleteStoredMedia(media.storedRelativePath);
+    await this.messageModel.updateOne(
+      { whatsappMessageId: media.whatsappMessageId },
+      { $unset: { 'media.storedRelativePath': '' } },
+    );
+  }
 
   public async findInboundMediaByWhatsappMessageId(
     whatsappMessageId: string,

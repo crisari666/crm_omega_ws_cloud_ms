@@ -3,28 +3,24 @@ import { readFile } from 'fs/promises';
 import * as path from 'path';
 import { PDFParse } from 'pdf-parse';
 
-// eslint-disable-next-line @typescript-eslint/no-var-requires
-const mammoth = require('mammoth') as {
-  extractRawText: (input: { buffer: Buffer }) => Promise<{ value: string }>;
-};
-
 const MAX_CV_TEXT_CHARS = 20000;
 const PDF_MIME_TYPE = 'application/pdf';
-const DOCX_MIME_TYPE =
-  'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
+const PDF_EXTENSION = '.pdf';
 
 /**
- * Extracts plain text from CV files (PDF / DOCX) stored on local disk.
+ * Extracts plain text from PDF CV files stored on local disk.
  */
 @Injectable()
 export class CvTextExtractorService {
   private readonly logger = new Logger(CvTextExtractorService.name);
 
   /**
-   * Returns true when the file type can be parsed as a CV.
+   * Returns true when the file is a PDF (the only accepted CV format).
    */
-  public isSupportedCvFile(input: { mimeType: string; filename: string }): boolean {
-    return this.resolveKind(input) != null;
+  public isPdfFile(input: { mimeType: string; filename: string }): boolean {
+    const mimeType = (input.mimeType ?? '').toLowerCase();
+    const extension = path.extname(input.filename ?? '').toLowerCase();
+    return mimeType === PDF_MIME_TYPE || extension === PDF_EXTENSION;
   }
 
   /**
@@ -35,20 +31,16 @@ export class CvTextExtractorService {
     mimeType: string;
     filename?: string;
   }): Promise<string> {
-    const kind = this.resolveKind({
+    const isPdf = this.isPdfFile({
       mimeType: input.mimeType,
       filename: input.filename ?? input.absolutePath,
     });
-    if (kind == null) {
+    if (!isPdf) {
       return '';
     }
     try {
       const buffer = await readFile(input.absolutePath);
-      const raw =
-        kind === 'pdf'
-          ? await this.extractPdfText(buffer)
-          : (await mammoth.extractRawText({ buffer })).value;
-      return this.normalizeText(raw);
+      return this.normalizeText(await this.extractPdfText(buffer));
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       this.logger.warn(`extractText failed for ${input.absolutePath}: ${message}`);
@@ -63,14 +55,6 @@ export class CvTextExtractorService {
     } finally {
       await parser.destroy();
     }
-  }
-
-  private resolveKind(input: { mimeType: string; filename: string }): 'pdf' | 'docx' | null {
-    const mimeType = (input.mimeType ?? '').toLowerCase();
-    const extension = path.extname(input.filename ?? '').toLowerCase();
-    if (mimeType === PDF_MIME_TYPE || extension === '.pdf') return 'pdf';
-    if (mimeType === DOCX_MIME_TYPE || extension === '.docx') return 'docx';
-    return null;
   }
 
   private normalizeText(raw: string): string {

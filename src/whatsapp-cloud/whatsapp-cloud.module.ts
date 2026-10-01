@@ -12,6 +12,10 @@ import { RecruitingWhatsappCaptureService } from './recruiting-whatsapp-capture.
 import { CvTextExtractorService } from './cv-text-extractor.service';
 import { WhatsappChat, WhatsappChatSchema } from './schemas/whatsapp-chat.schema';
 import { WhatsappMessage, WhatsappMessageSchema } from './schemas/whatsapp-message.schema';
+import {
+  RecruitingCaptureSession,
+  RecruitingCaptureSessionSchema,
+} from './schemas/recruiting-capture-session.schema';
 import { WhatsappLocalMediaStorageService } from './whatsapp-local-media-storage.service';
 import { WsChatMsgHandlerService } from './ws-chat-msg-handler.service';
 import { whatsappClientProvider } from './providers/whatsapp-client.provider';
@@ -22,6 +26,7 @@ import { whatsappClientProvider } from './providers/whatsapp-client.provider';
     MongooseModule.forFeature([
       { name: WhatsappChat.name, schema: WhatsappChatSchema },
       { name: WhatsappMessage.name, schema: WhatsappMessageSchema },
+      { name: RecruitingCaptureSession.name, schema: RecruitingCaptureSessionSchema },
     ]),
     ClientsModule.registerAsync([
       {
