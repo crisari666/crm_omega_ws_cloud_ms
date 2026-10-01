@@ -98,6 +98,10 @@ export class WhatsappOnboardingEventsController {
       await this.handleRecruitingMeetLink(payload);
       return { success: true };
     }
+    if (actionValue === 'send.recruiting_meet_template') {
+      await this.handleRecruitingMeetTemplate(payload);
+      return { success: true };
+    }
     if (actionValue === 'recruiting.purge_candidate') {
       return this.handleRecruitingPurgeCandidate(payload);
     }
@@ -691,6 +695,26 @@ export class WhatsappOnboardingEventsController {
     );
   }
 
+  private async handleRecruitingMeetTemplate(
+    payload: Record<string, unknown>,
+  ): Promise<void> {
+    const to = this.readOptionalString(payload.to);
+    const templateName = this.readOptionalString(payload.templateName);
+    const meetCode = this.readOptionalString(payload.meetCode);
+    if (to == null || templateName == null || meetCode == null) {
+      this.logger.warn('send.recruiting_meet_template: missing to, templateName or meetCode');
+      return;
+    }
+    await this.whatsappCloudService.sendRecruitingMeetTemplate({
+      phoneNumber: to.replace(/\D/g, ''),
+      templateName,
+      languageCode: this.readOptionalString(payload.templateLanguage) ?? 'es_CO',
+      contactName: this.readOptionalString(payload.contactName) ?? '',
+      dateText: this.readOptionalString(payload.date_) ?? '',
+      timeText: this.readOptionalString(payload.time) ?? '',
+      meetCode,
+    });
+  }
 
   private async handleRecruitingMeetLink(
     payload: Record<string, unknown>,

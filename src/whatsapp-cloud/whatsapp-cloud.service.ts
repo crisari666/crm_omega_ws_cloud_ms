@@ -9,6 +9,7 @@ import {
   WhatsAppMessageTemplate,
   type Component,
 } from './interfaces/message-template-type';
+import type { RecruitingMeetTemplateInput } from './interfaces/recruiting-meet-template-input.interface';
 import { WsChatMsgHandlerService } from './ws-chat-msg-handler.service';
 import {
   WHATSAPP_TEMPLATE_CONFIRMAR_CAPACITACION,
@@ -775,6 +776,52 @@ export class WhatsappCloudService {
     };
     this.logger.log(
       `[sendRecruitingOpeningTemplate] ${templateName}/${languageCode} contact_name=${contactName} → ${input.phoneNumber}`,
+    );
+    return this.msgTemplate(templateMessage);
+  }
+
+  /**
+   * Sends the recruiting group Meet template (name/language from the Job Campaign).
+   */
+  public async sendRecruitingMeetTemplate(
+    input: RecruitingMeetTemplateInput,
+  ): Promise<unknown> {
+    const templateName = input.templateName.trim();
+    const languageCode = input.languageCode.trim();
+    if (templateName.length === 0 || languageCode.length === 0) {
+      throw new HttpException(
+        'Recruiting Meet template requires templateName and languageCode',
+        HttpStatus.BAD_REQUEST,
+      );
+    }
+    const templateMessage: WhatsAppMessageTemplate = {
+      to: input.phoneNumber,
+      messaging_product: 'whatsapp',
+      recipient_type: 'individual',
+      type: 'template',
+      template: {
+        name: templateName,
+        language: { code: languageCode },
+        components: [
+          {
+            type: 'body',
+            parameters: [
+              { type: 'text', text: input.contactName.trim() || '-', parameter_name: 'contact_name' },
+              { type: 'text', text: input.dateText.trim() || '-', parameter_name: 'date_' },
+              { type: 'text', text: input.timeText.trim() || '-', parameter_name: 'time' },
+            ],
+          },
+          {
+            type: 'button',
+            sub_type: 'url',
+            index: 0,
+            parameters: [{ type: 'text', text: input.meetCode.trim() }],
+          },
+        ],
+      },
+    };
+    this.logger.log(
+      `[sendRecruitingMeetTemplate] ${templateName}/${languageCode} code=${input.meetCode} → ${input.phoneNumber}`,
     );
     return this.msgTemplate(templateMessage);
   }
