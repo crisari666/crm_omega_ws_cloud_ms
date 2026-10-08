@@ -5,6 +5,7 @@ import { lastValueFrom } from 'rxjs';
 import { WhatsappCloudService } from './whatsapp-cloud.service';
 import { RecruitingWhatsappCaptureService } from './recruiting-whatsapp-capture.service';
 import { WsChatMsgHandlerService } from './ws-chat-msg-handler.service';
+import { RecruitingMeetMessageService } from './recruiting-meet-message.service';
 
 type CrmBackEventSourceType = 'ws_ms_events' | 'voice_agent_ms_events';
 
@@ -40,6 +41,7 @@ export class WhatsappOnboardingEventsController {
     private readonly whatsappCloudService: WhatsappCloudService,
     private readonly recruitingWhatsappCaptureService: RecruitingWhatsappCaptureService,
     private readonly wsChatMsgHandlerService: WsChatMsgHandlerService,
+    private readonly recruitingMeetMessageService: RecruitingMeetMessageService,
     @Inject('CRM_BACK_QUEUE') private readonly crmBackQueueClient: ClientProxy,
   ) {}
 
@@ -701,19 +703,41 @@ export class WhatsappOnboardingEventsController {
     const to = this.readOptionalString(payload.to);
     const templateName = this.readOptionalString(payload.templateName);
     const meetCode = this.readOptionalString(payload.meetCode);
+    const candidateId = this.readOptionalString(payload.candidateId) ?? '';
     if (to == null || templateName == null || meetCode == null) {
       this.logger.warn('send.recruiting_meet_template: missing to, templateName or meetCode');
+      await this.reportMeetTemplateFailed({
+        candidateId,
+        errorMessage: 'Falta teléfono, plantilla o código del Meet',
+      });
       return;
     }
-    await this.whatsappCloudService.sendRecruitingMeetTemplate({
-      phoneNumber: to.replace(/\D/g, ''),
-      templateName,
-      languageCode: this.readOptionalString(payload.templateLanguage) ?? 'es_CO',
-      contactName: this.readOptionalString(payload.contactName) ?? '',
-      dateText: this.readOptionalString(payload.date_) ?? '',
-      timeText: this.readOptionalString(payload.time) ?? '',
-      meetCode,
-    });
+    try {
+      const response = await this.whatsappCloudService.sendRecruitingMeetTemplate({
+        phoneNumber: to.replace(/\D/g, ''),
+        templateName,
+        languageCode: this.readOptionalString(payload.templateLanguage) ?? 'es_CO',
+        contactName: this.readOptionalString(payload.contactName) ?? '',
+        dateText: this.readOptionalString(payload.date_) ?? '',
+        timeText: this.readOptionalString(payload.time) ?? '',
+        meetCode,
+      });
+      const whatsappMessageId = extractFirstMessageId(response);
+      if (candidateId.length === 0 || whatsappMessageId == null) return;
+      await this.recruitingMeetMessageService.reportTemplateSent({ candidateId, whatsappMessageId });
+    } catch (err: unknown) {
+      const errorMessage = err instanceof Error ? err.message : String(err);
+      this.logger.warn(`send.recruiting_meet_template failed for ${candidateId}: ${errorMessage}`);
+      await this.reportMeetTemplateFailed({ candidateId, errorMessage });
+    }
+  }
+
+  private async reportMeetTemplateFailed(input: {
+    readonly candidateId: string;
+    readonly errorMessage: string;
+  }): Promise<void> {
+    if (input.candidateId.length === 0) return;
+    await this.recruitingMeetMessageService.reportTemplateFailed(input);
   }
 
   private async handleRecruitingMeetLink(

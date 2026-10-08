@@ -13,6 +13,7 @@ import { WhatsappCloudService } from './whatsapp-cloud.service';
 import { WsChatMsgHandlerService } from './ws-chat-msg-handler.service';
 import { DeepSeekService } from './deep-seek.service';
 import { RecruitingWhatsappCaptureService } from './recruiting-whatsapp-capture.service';
+import { RecruitingMeetMessageService } from './recruiting-meet-message.service';
 import { SendTextDto } from './dto/send-text.dto';
 import { SendHelloWorldTemplateDto } from './dto/send-hellow-world-template.dto';
 import { SendTemplateInfoTrainingDto } from './dto/send-template-info-training.dto';
@@ -44,6 +45,7 @@ export class WhatsappCloudController {
     private readonly deepSeekService: DeepSeekService,
     private readonly recruitingWhatsappCaptureService: RecruitingWhatsappCaptureService,
     private readonly wsChatMsgHandlerService: WsChatMsgHandlerService,
+    private readonly recruitingMeetMessageService: RecruitingMeetMessageService,
     @Inject('CRM_BACK_QUEUE') private readonly crmBackQueueClient: ClientProxy,
     @Inject('CUSTOMERS_MS_INTEGRATION')
     private readonly customersMsIntegrationClient: ClientProxy,
@@ -307,6 +309,7 @@ export class WhatsappCloudController {
     const statusesValue = value.statuses as Array<Record<string, unknown>> | undefined;
     if (Array.isArray(statusesValue)) {
       for (const status of statusesValue) {
+        await this.recruitingMeetMessageService.reportWebhookStatusIfTracked(status);
         const ecosystemPayload = this.extractEcosystemBlockedDeliveryPayload(status);
         if (ecosystemPayload != null) {
           await lastValueFrom(

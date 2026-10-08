@@ -16,6 +16,11 @@ import {
   RecruitingCaptureSession,
   RecruitingCaptureSessionSchema,
 } from './schemas/recruiting-capture-session.schema';
+import {
+  RecruitingMeetMessage,
+  RecruitingMeetMessageSchema,
+} from './schemas/recruiting-meet-message.schema';
+import { RecruitingMeetMessageService } from './recruiting-meet-message.service';
 import { WhatsappLocalMediaStorageService } from './whatsapp-local-media-storage.service';
 import { WsChatMsgHandlerService } from './ws-chat-msg-handler.service';
 import { whatsappClientProvider } from './providers/whatsapp-client.provider';
@@ -27,6 +32,7 @@ import { whatsappClientProvider } from './providers/whatsapp-client.provider';
       { name: WhatsappChat.name, schema: WhatsappChatSchema },
       { name: WhatsappMessage.name, schema: WhatsappMessageSchema },
       { name: RecruitingCaptureSession.name, schema: RecruitingCaptureSessionSchema },
+      { name: RecruitingMeetMessage.name, schema: RecruitingMeetMessageSchema },
     ]),
     ClientsModule.registerAsync([
       {
@@ -83,6 +89,7 @@ import { whatsappClientProvider } from './providers/whatsapp-client.provider';
     WhatsappCloudService,
     DeepSeekService,
     RecruitingWhatsappCaptureService,
+    RecruitingMeetMessageService,
     CvTextExtractorService,
   ],
   exports: [
