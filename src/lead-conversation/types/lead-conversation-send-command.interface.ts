@@ -1,0 +1,15 @@
+import type { LeadConversationButton } from './lead-conversation-button.interface';
+import type { LeadConversationMessageKind } from './lead-conversation-message-kind.type';
+
+/**
+ * RPC payload for `lead_conversation.send.v1` (crm-omega-customers-ms → whatsapp_cloud_ms).
+ */
+export interface LeadConversationSendCommand {
+  readonly to: string;
+  readonly kind: LeadConversationMessageKind;
+  readonly body?: string;
+  readonly mediaUrl?: string;
+  readonly fileName?: string;
+  readonly buttons?: readonly LeadConversationButton[];
+  readonly listButtonLabel?: string;
+}

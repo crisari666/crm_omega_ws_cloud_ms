@@ -7,6 +7,7 @@ import { WhatsappCloudModule } from './whatsapp-cloud/whatsapp-cloud.module';
 import { GatewayEventsModule } from './gateway-events/gateway-events.module';
 import { PotentialCustomersModule } from './potential-customers/potential-customers.module';
 import { MarketingCampaignModule } from './marketing-campaign/marketing-campaign.module';
+import { LeadConversationModule } from './lead-conversation/lead-conversation.module';
 import { databaseConfig } from './config/database.config';
 import { ClientsModule, Transport } from '@nestjs/microservices';
 
@@ -49,6 +50,7 @@ import { ClientsModule, Transport } from '@nestjs/microservices';
     GatewayEventsModule,
     PotentialCustomersModule,
     MarketingCampaignModule,
+    LeadConversationModule,
   ],
   controllers: [AppController],
   providers: [AppService],
