@@ -267,6 +267,7 @@ export class WhatsappCloudService {
       lastName: input.lastName,
       phone: trimmedPhone,
       waId: input.waId,
+      voipPhone: input.voipPhone,
     };
     const payload = buildWhatsappContactsMessagePayload(contactInput);
     const summary = buildWhatsappContactsMessageSummary(contactInput);

@@ -6,6 +6,8 @@ export type BuildWhatsappContactsMessageInput = {
   readonly lastName: string;
   readonly phone: string;
   readonly waId?: string;
+  /** Twilio VOIP caller ID shown as MAIN on the Meta contacts card. */
+  readonly voipPhone?: string;
 };
 
 export type WhatsappContactsMessagePayload = {
@@ -21,7 +23,7 @@ export type WhatsappContactsMessagePayload = {
     };
     readonly phones: ReadonlyArray<{
       readonly phone: string;
-      readonly type: 'WORK';
+      readonly type: 'WORK' | 'MAIN';
       readonly wa_id: string;
     }>;
     readonly org: {
@@ -52,6 +54,28 @@ export function buildWhatsappContactsMessagePayload(
     displayName.length > 0
       ? `${displayName} (Asesor La Ceiba)`
       : 'Asesor La Ceiba';
+
+  const phones: Array<{ phone: string; type: 'WORK' | 'MAIN'; wa_id: string }> = [
+    {
+      phone,
+      type: 'WORK',
+      wa_id: waId,
+    },
+  ];
+
+  const voipPhone: string =
+    typeof input.voipPhone === 'string' ? input.voipPhone.trim() : '';
+  if (voipPhone.length > 0) {
+    const voipWaId: string = normalizeWaId(voipPhone);
+    if (voipWaId.length > 0) {
+      phones.push({
+        phone: voipPhone,
+        type: 'MAIN',
+        wa_id: voipWaId,
+      });
+    }
+  }
+
   return {
     messaging_product: 'whatsapp',
     recipient_type: 'individual',
@@ -64,13 +88,7 @@ export function buildWhatsappContactsMessagePayload(
           first_name: firstName.length > 0 ? firstName : 'Asesor',
           last_name: lastName,
         },
-        phones: [
-          {
-            phone,
-            type: 'WORK',
-            wa_id: waId,
-          },
-        ],
+        phones,
         org: {
           company: VENTOR_CONTACT_COMPANY,
           title: VENTOR_CONTACT_TITLE,
@@ -88,5 +106,6 @@ export function buildWhatsappContactsMessageSummary(
 ): string {
   const payload = buildWhatsappContactsMessagePayload(input);
   const contact = payload.contacts[0];
-  return `Contacto: ${contact.name.formatted_name} — ${contact.phones[0].phone}`;
+  const phones = contact.phones.map((entry) => entry.phone).join(', ');
+  return `Contacto: ${contact.name.formatted_name} — ${phones}`;
 }

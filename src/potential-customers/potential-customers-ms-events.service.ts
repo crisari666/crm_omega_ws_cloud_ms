@@ -67,6 +67,7 @@ export class PotentialCustomersMsEventsService {
       const lastName: string = typeof contact.lastName === 'string' ? contact.lastName : '';
       const phone: string = typeof contact.phone === 'string' ? contact.phone : '';
       const contactWaId: string = typeof contact.waId === 'string' ? contact.waId : '';
+      const voipPhone: string = typeof contact.voipPhone === 'string' ? contact.voipPhone : '';
       const introBody: string = typeof payload.body === 'string' ? payload.body.trim() : '';
       if (waId.trim() === '' || phone.trim() === '') {
         return { success: false, message: 'missing waId or contact.phone' };
@@ -80,6 +81,7 @@ export class PotentialCustomersMsEventsService {
         lastName: lastName.trim(),
         phone: phone.trim(),
         waId: contactWaId.trim().length > 0 ? contactWaId.trim() : undefined,
+        voipPhone: voipPhone.trim().length > 0 ? voipPhone.trim() : undefined,
       });
       return { success: true };
     }

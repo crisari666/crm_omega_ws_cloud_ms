@@ -69,6 +69,29 @@ describe('buildLeadConversationGraphPayload', () => {
     expect(contacts[0].phones[1]).toEqual({ phone: '6015551212', type: 'WORK', wa_id: '6015551212' });
   });
 
+  it('builds a contacts card with CELL, WORK, and MAIN (VOIP) phones', () => {
+    const actual = buildLeadConversationGraphPayload({
+      to: '573001112233',
+      kind: 'contacts',
+      contact: {
+        firstName: 'Ana',
+        lastName: 'López',
+        phones: [
+          { phone: '3001112233', type: 'CELL' },
+          { phone: '6015551212', type: 'WORK' },
+          { phone: '+57 300 9998877', type: 'MAIN' },
+        ],
+      },
+    });
+    const contacts = actual.contacts as { phones: { type: string; phone: string; wa_id: string }[] }[];
+    expect(contacts[0].phones).toHaveLength(3);
+    expect(contacts[0].phones[2]).toEqual({
+      phone: '+57 300 9998877',
+      type: 'MAIN',
+      wa_id: '573009998877',
+    });
+  });
+
   it('throws when contacts has no usable phones', () => {
     expect(() =>
       buildLeadConversationGraphPayload({

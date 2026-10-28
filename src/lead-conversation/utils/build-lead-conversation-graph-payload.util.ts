@@ -38,7 +38,10 @@ function buildContactsPayload(to: string, contact: LeadConversationContact): Gra
       if (waId.length === 0) return null;
       return { phone, type: entry.type, wa_id: waId };
     })
-    .filter((entry): entry is { phone: string; type: 'CELL' | 'WORK'; wa_id: string } => entry != null);
+    .filter(
+      (entry): entry is { phone: string; type: 'CELL' | 'WORK' | 'MAIN'; wa_id: string } =>
+        entry != null,
+    );
   if (phones.length === 0) {
     throw new Error('contacts message requires at least one phone');
   }

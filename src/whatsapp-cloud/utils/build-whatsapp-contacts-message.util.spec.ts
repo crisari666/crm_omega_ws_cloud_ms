@@ -39,6 +39,20 @@ describe('buildWhatsappContactsMessagePayload', () => {
     });
   });
 
+  it('appends voipPhone as MAIN when provided', () => {
+    const actual = buildWhatsappContactsMessagePayload({
+      to: '573001234567',
+      firstName: 'Ana',
+      lastName: 'López',
+      phone: '3001234567',
+      voipPhone: '+57 300 9998877',
+    });
+    expect(actual.contacts[0].phones).toEqual([
+      { phone: '3001234567', type: 'WORK', wa_id: '3001234567' },
+      { phone: '+57 300 9998877', type: 'MAIN', wa_id: '573009998877' },
+    ]);
+  });
+
   it('prefers explicit waId when provided', () => {
     const actual = buildWhatsappContactsMessagePayload({
       to: '573009876543',
@@ -60,5 +74,18 @@ describe('buildWhatsappContactsMessageSummary', () => {
       phone: '3001234567',
     });
     expect(actual).toBe('Contacto: Ana López (Asesor La Ceiba) — 3001234567');
+  });
+
+  it('includes voipPhone in the summary when present', () => {
+    const actual = buildWhatsappContactsMessageSummary({
+      to: '573001234567',
+      firstName: 'Ana',
+      lastName: 'López',
+      phone: '3001234567',
+      voipPhone: '+573009998877',
+    });
+    expect(actual).toBe(
+      'Contacto: Ana López (Asesor La Ceiba) — 3001234567, +573009998877',
+    );
   });
 });
