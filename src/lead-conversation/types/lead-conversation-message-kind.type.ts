@@ -1,1 +1,7 @@
-export type LeadConversationMessageKind = 'text' | 'image' | 'document' | 'buttons' | 'list';
+export type LeadConversationMessageKind =
+  | 'text'
+  | 'image'
+  | 'document'
+  | 'buttons'
+  | 'list'
+  | 'contacts';

@@ -1,3 +1,4 @@
+import { normalizeWaId } from '../../whatsapp-cloud/utils/normalize-wa-id.util';
 import {
   DEFAULT_LIST_BUTTON_LABEL,
   DEFAULT_LIST_SECTION_TITLE,
@@ -9,15 +10,59 @@ import {
   MAX_REPLY_BUTTONS,
 } from '../constants/lead-conversation.constants';
 import type { LeadConversationButton } from '../types/lead-conversation-button.interface';
+import type { LeadConversationContact } from '../types/lead-conversation-contact.interface';
 import type { LeadConversationSendCommand } from '../types/lead-conversation-send-command.interface';
 
 type GraphPayload = Record<string, unknown>;
+
+const VENTOR_CONTACT_COMPANY = 'La Ceiba Group' as const;
+const VENTOR_CONTACT_TITLE = 'Asesor Comercial Asignado' as const;
 
 const truncate = (value: string, max: number): string =>
   value.length <= max ? value : `${value.slice(0, max - 1)}…`;
 
 function buildBaseEnvelope(to: string): GraphPayload {
   return { messaging_product: 'whatsapp', recipient_type: 'individual', to };
+}
+
+function buildContactsPayload(to: string, contact: LeadConversationContact): GraphPayload {
+  const firstName: string = contact.firstName.trim();
+  const lastName: string = contact.lastName.trim();
+  const phones = contact.phones
+    .map((entry) => {
+      const phone: string = entry.phone.trim();
+      if (phone.length === 0) return null;
+      const waIdSource: string =
+        entry.waId != null && entry.waId.trim().length > 0 ? entry.waId.trim() : phone;
+      const waId: string = normalizeWaId(waIdSource);
+      if (waId.length === 0) return null;
+      return { phone, type: entry.type, wa_id: waId };
+    })
+    .filter((entry): entry is { phone: string; type: 'CELL' | 'WORK'; wa_id: string } => entry != null);
+  if (phones.length === 0) {
+    throw new Error('contacts message requires at least one phone');
+  }
+  const displayName: string = `${firstName} ${lastName}`.trim();
+  const formattedName: string =
+    displayName.length > 0 ? `${displayName} (Asesor La Ceiba)` : 'Asesor La Ceiba';
+  return {
+    ...buildBaseEnvelope(to),
+    type: 'contacts',
+    contacts: [
+      {
+        name: {
+          formatted_name: formattedName,
+          first_name: firstName.length > 0 ? firstName : 'Asesor',
+          last_name: lastName,
+        },
+        phones,
+        org: {
+          company: VENTOR_CONTACT_COMPANY,
+          title: VENTOR_CONTACT_TITLE,
+        },
+      },
+    ],
+  };
 }
 
 function buildButtonsInteractive(body: string, buttons: readonly LeadConversationButton[]): GraphPayload {
@@ -95,6 +140,9 @@ export function buildLeadConversationGraphPayload(command: LeadConversationSendC
         type: 'interactive',
         interactive: buildListInteractive(body, options, command.listButtonLabel ?? DEFAULT_LIST_BUTTON_LABEL),
       };
+    case 'contacts':
+      if (command.contact == null) throw new Error('contacts message requires contact');
+      return buildContactsPayload(command.to.trim(), command.contact);
     default:
       throw new Error(`unsupported lead conversation message kind`);
   }

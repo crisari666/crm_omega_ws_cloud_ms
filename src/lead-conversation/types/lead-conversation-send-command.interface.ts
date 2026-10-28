@@ -1,4 +1,5 @@
 import type { LeadConversationButton } from './lead-conversation-button.interface';
+import type { LeadConversationContact } from './lead-conversation-contact.interface';
 import type { LeadConversationMessageKind } from './lead-conversation-message-kind.type';
 
 /**
@@ -12,4 +13,5 @@ export interface LeadConversationSendCommand {
   readonly fileName?: string;
   readonly buttons?: readonly LeadConversationButton[];
   readonly listButtonLabel?: string;
+  readonly contact?: LeadConversationContact;
 }
