@@ -6,6 +6,7 @@ type PotentialCustomersContactPayload = {
   readonly lastName?: unknown;
   readonly phone?: unknown;
   readonly waId?: unknown;
+  readonly voipPhone?: unknown;
 };
 
 type PotentialCustomersPayload = {
