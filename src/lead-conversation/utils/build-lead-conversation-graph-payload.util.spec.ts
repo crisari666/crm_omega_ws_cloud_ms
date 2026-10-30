@@ -28,6 +28,36 @@ describe('buildLeadConversationGraphPayload', () => {
     expect(() => buildLeadConversationGraphPayload({ to: '1', kind: 'image' })).toThrow();
   });
 
+  it('builds a template message with named body param', () => {
+    const actual = buildLeadConversationGraphPayload({
+      to: '573001112233',
+      kind: 'template',
+      templateName: 'lead_conversation_welcome',
+      languageCode: 'es',
+      templateComponents: [
+        {
+          type: 'body',
+          parameters: [{ type: 'text', text: 'Ana', parameter_name: 'contact_name' }],
+        },
+      ],
+    });
+    expect(actual.type).toBe('template');
+    expect(actual.template).toEqual({
+      name: 'lead_conversation_welcome',
+      language: { code: 'es' },
+      components: [
+        {
+          type: 'body',
+          parameters: [{ type: 'text', text: 'Ana', parameter_name: 'contact_name' }],
+        },
+      ],
+    });
+  });
+
+  it('throws when template has no templateName', () => {
+    expect(() => buildLeadConversationGraphPayload({ to: '1', kind: 'template' })).toThrow();
+  });
+
   it('builds a contacts card with one CELL phone', () => {
     const actual = buildLeadConversationGraphPayload({
       to: '573001112233',

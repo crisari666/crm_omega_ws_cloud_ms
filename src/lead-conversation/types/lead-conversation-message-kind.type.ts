@@ -4,4 +4,5 @@ export type LeadConversationMessageKind =
   | 'document'
   | 'buttons'
   | 'list'
-  | 'contacts';
+  | 'contacts'
+  | 'template';

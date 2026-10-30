@@ -146,6 +146,25 @@ export function buildLeadConversationGraphPayload(command: LeadConversationSendC
     case 'contacts':
       if (command.contact == null) throw new Error('contacts message requires contact');
       return buildContactsPayload(command.to.trim(), command.contact);
+    case 'template': {
+      const templateName = (command.templateName ?? '').trim();
+      if (templateName.length === 0) {
+        throw new Error('template message requires templateName');
+      }
+      const languageCode = (command.languageCode ?? 'es').trim() || 'es';
+      const components = Array.isArray(command.templateComponents)
+        ? command.templateComponents
+        : [];
+      return {
+        ...base,
+        type: 'template',
+        template: {
+          name: templateName,
+          language: { code: languageCode },
+          ...(components.length > 0 ? { components } : {}),
+        },
+      };
+    }
     default:
       throw new Error(`unsupported lead conversation message kind`);
   }

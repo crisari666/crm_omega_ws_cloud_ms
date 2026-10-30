@@ -14,4 +14,8 @@ export interface LeadConversationSendCommand {
   readonly buttons?: readonly LeadConversationButton[];
   readonly listButtonLabel?: string;
   readonly contact?: LeadConversationContact;
+  /** Required when `kind` is `template` (opens 24h window on leads line). */
+  readonly templateName?: string;
+  readonly languageCode?: string;
+  readonly templateComponents?: readonly Record<string, unknown>[];
 }
