@@ -37,7 +37,7 @@ export class LeadConversationSenderService {
   private async postGraphMessages(payload: Record<string, unknown>): Promise<GraphMessagesResponse> {
     const phoneNumberId = this.getRequiredEnv('WHATSAPP_CLOUD_LEADS_PHONE_NUMBER_ID');
     const accessToken = this.getRequiredEnv('WHATSAPP_CLOUD_LEADS_ACCESS_TOKEN');
-    const version = this.configService.get<string>('WHATSAPP_CLOUD_API_VERSION', 'v25.0');
+    const version = this.configService.get<string>('WHATSAPP_CLOUD_API_VERSION', 'v26.0');
     const httpResponse = await fetch(`https://graph.facebook.com/${version}/${phoneNumberId}/messages`, {
       method: 'POST',
       headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
